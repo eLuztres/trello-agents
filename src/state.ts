@@ -1,0 +1,31 @@
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+
+const STATE_FILE = path.resolve(import.meta.dirname, '..', 'state.json');
+
+export interface CardState {
+  idShort: number;
+  name: string;
+  repo: string;
+  branch: string;
+  worktree: string;
+  /** Shared by plan and build, so the builder remembers the plan and your feedback. */
+  devSessionId?: string;
+  /** The reviewer gets its own session for a fresh look at the diff. */
+  reviewSessionId?: string;
+  lastStage?: string;
+  lastStatus?: 'running' | 'done' | 'failed' | 'stopped';
+}
+
+export interface State {
+  lastActionId?: string;
+  cards: Record<string, CardState>;
+}
+
+export function loadState(): State {
+  return existsSync(STATE_FILE) ? (JSON.parse(readFileSync(STATE_FILE, 'utf8')) as State) : { cards: {} };
+}
+
+export function saveState(state: State): void {
+  writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+}
