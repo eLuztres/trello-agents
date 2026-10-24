@@ -112,6 +112,11 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
   const stage = job.stage ?? stageByListId[card.idList];
   if (!stage) return;
 
+  if (card.labels.some((label) => CONFIG.manualLabels.includes(label.name.toLowerCase()))) {
+    await trello.addComment(card.id, `${BOT_PREFIX} This card is labeled for manual work, so no agent starts. Move it on yourself when it's done.`);
+    return;
+  }
+
   const cardState = ensureCardState(card);
   const title = `#${card.idShort} ${STAGE_TITLES[stage]}`;
   const logFile = path.join(LOG_DIR, `card-${card.idShort}.log`);

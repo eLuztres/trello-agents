@@ -10,6 +10,8 @@ export interface Config {
   /** A card label with one of these names picks the repo, otherwise defaultRepo is used. */
   repos: Record<string, string>;
   defaultRepo: string;
+  /** Cards with one of these labels are done by hand: they never start an agent. */
+  manualLabels: string[];
   baseBranch: string;
   worktreeRoot: string;
   maxParallelJobs: number;
@@ -18,13 +20,16 @@ export interface Config {
 }
 
 export const CONFIG: Config = {
-  boardId: 'CkzfM3eh',
+  boardId: 'd5Qaotvz',
   lists: { plan: 'To Do', build: 'Doing', review: 'Testing' },
   repos: {
     webStore: path.join(WORKSPACE, 'webStore'),
     custom: path.join(WORKSPACE, 'custom'),
+    'shop-emlets': path.join(WORKSPACE, 'shop-emlets'),
+    'shop-baifo': path.join(WORKSPACE, 'shop-baifo'),
   },
-  defaultRepo: 'webStore',
+  defaultRepo: 'shop-baifo',
+  manualLabels: ['manual'],
   baseBranch: 'main',
   worktreeRoot: path.join(WORKSPACE, '.worktrees'),
   maxParallelJobs: 2,
