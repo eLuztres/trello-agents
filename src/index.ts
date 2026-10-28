@@ -30,6 +30,7 @@ interface Job {
 const state = loadState();
 const queue: Job[] = [];
 const running = new Map<string, AbortController>();
+const runningGitCards = new Set<string>();
 let stageByListId: Record<string, Stage>;
 let uncommittedListId: string;
 let plannedListId: string;
@@ -146,13 +147,19 @@ function removeQueuedJobs(cardId: string): void {
 
 function startQueuedJobs(): void {
   while (true) {
-    // Commits and pushes are quick plain git, so they don't wait for a free agent slot.
+    // Commits and pushes are quick plain git, so they don't wait for a free agent slot; but only one at a time,
+    // else two pushes of the same branch clash.
     const hasFreeSlot = running.size < CONFIG.maxParallelJobs;
-    const index = queue.findIndex((job) => !running.has(job.cardId) && (hasFreeSlot || (job.stage !== undefined && isGitStage(job.stage))));
+    const isGitJob = (job: Job) => job.stage !== undefined && isGitStage(job.stage);
+    const isGitRunning = runningGitCards.size > 0;
+    const index = queue.findIndex(
+      (job) => !running.has(job.cardId) && (isGitJob(job) ? !isGitRunning : hasFreeSlot),
+    );
     if (index === -1) return;
     const [job] = queue.splice(index, 1);
     const controller = new AbortController();
     running.set(job.cardId, controller);
+    if (isGitJob(job)) runningGitCards.add(job.cardId);
     // Staged jobs got the label when they were queued; a comment's reply gets it now.
     if (!job.stage) markWorking(job.cardId, true);
 
@@ -160,6 +167,7 @@ function startQueuedJobs(): void {
       .catch((error: Error) => console.error(`Card ${job.cardId}: ${error.message}`))
       .finally(() => {
         running.delete(job.cardId);
+        runningGitCards.delete(job.cardId);
         if (!isBusy(job.cardId)) markWorking(job.cardId, false);
         startQueuedJobs();
       });
