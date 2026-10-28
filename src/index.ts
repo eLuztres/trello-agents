@@ -104,6 +104,7 @@ async function undoWrongMove(cardId: string, toListId: string, fromListId: strin
 async function stopCard(cardId: string): Promise<void> {
   running.get(cardId)?.abort();
   removeQueuedJobs(cardId);
+  if (!running.has(cardId)) markWorking(cardId, false);
   await trello.moveCard(cardId, backlogListId);
   await trello.addComment(cardId, `${BOT_PREFIX} Stopped. The card waits in **${CONFIG.backlogList}**; move it to **${CONFIG.lists.build?.[0]}** to start again.`);
 }
@@ -128,7 +129,13 @@ function schedule(event: CardEvent): void {
   // A move means you changed your mind: stop whatever this card was doing.
   running.get(event.cardId)?.abort();
   removeQueuedJobs(event.cardId);
-  if (event.stage) queue.push({ cardId: event.cardId, stage: event.stage });
+  if (event.stage) enqueue({ cardId: event.cardId, stage: event.stage });
+}
+
+/** Queues an agent's job; the card wears the working label from now on, so it shows (and is locked) while it waits. */
+function enqueue(job: Job): void {
+  if (!isBusy(job.cardId)) markWorking(job.cardId, true);
+  queue.push(job);
 }
 
 function removeQueuedJobs(cardId: string): void {
@@ -144,7 +151,8 @@ function startQueuedJobs(): void {
     const [job] = queue.splice(index, 1);
     const controller = new AbortController();
     running.set(job.cardId, controller);
-    markWorking(job.cardId, true);
+    // Staged jobs got the label when they were queued; a comment's reply gets it now.
+    if (!job.stage) markWorking(job.cardId, true);
 
     runJob(job, controller.signal)
       .catch((error: Error) => console.error(`Card ${job.cardId}: ${error.message}`))
@@ -250,7 +258,7 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
     const reviewListId = firstListId('review');
     if (result.isSuccess && stage === 'build' && reviewListId) {
       await trello.moveCard(card.id, reviewListId);
-      queue.push({ cardId: card.id, stage: 'review' });
+      enqueue({ cardId: card.id, stage: 'review' });
     }
     if (result.isSuccess && stage === 'plan') await moveAfterPlan(card, isReady);
     if (isReady && stage === 'review') await handOverReview(card, result.text, videoLinks, uncommittedListId);
@@ -316,7 +324,7 @@ async function runChat(card: TrelloCard, feedback: string, signal: AbortSignal):
 
     if (buildListId) {
       await trello.moveCard(card.id, buildListId);
-      queue.push({ cardId: card.id, stage: 'build' });
+      enqueue({ cardId: card.id, stage: 'build' });
     }
   } catch (error) {
     if (signal.aborted) return console.log(`${title}: stopped because the card moved`);
@@ -344,8 +352,14 @@ async function resumeAfterRestart(): Promise<void> {
     const awaitsReview = stage === 'build' && cardState.lastStatus === 'done';
     if (!stage || isGitStage(stage) || stage === 'chat' || (!isCutOff && !awaitsReview)) continue;
     const card = await trello.getCard(cardId).catch(() => undefined);
-    if (card && isCutOff && stageByListId[card.idList] === stage) queue.push({ cardId, stage });
-    else if (card && awaitsReview && card.idList === reviewListId) queue.push({ cardId, stage: 'review' });
+    if (card && isCutOff && stageByListId[card.idList] === stage) enqueue({ cardId, stage });
+    else if (card && awaitsReview && card.idList === reviewListId) enqueue({ cardId, stage: 'review' });
+  }
+  // Cards waiting in To Do or Planning were only queued in memory: those lists mean "build it" and "plan it".
+  for (const stage of ['build', 'plan'] as const) {
+    const listId = firstListId(stage);
+    const cards = listId ? await trello.getListCards(listId) : [];
+    for (const { id } of cards) if (!isBusy(id)) enqueue({ cardId: id, stage });
   }
   startQueuedJobs();
 }

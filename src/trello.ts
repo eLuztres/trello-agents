@@ -127,5 +127,7 @@ export const trello = {
 
   renameCard: (cardId: string, name: string) => request('PUT', `/cards/${cardId}`, { name }),
 
+  getListCards: (listId: string) => request<{ id: string }[]>('GET', `/lists/${listId}/cards`, { fields: 'id' }),
+
   getOpenCards: (boardId: string) => request<TrelloCard[]>('GET', `/boards/${boardId}/cards/open`, { fields: 'idShort,name' }),
 };
