@@ -11,7 +11,7 @@ const [me, lists, labels] = await Promise.all([
 console.log(`Signed in as @${me.username}\n`);
 console.log('Lists:');
 for (const list of lists) {
-  const stage = Object.entries(CONFIG.lists).find(([, name]) => name === list.name)?.[0];
+  const stage = Object.entries(CONFIG.lists).find(([, names]) => names.includes(list.name))?.[0];
   console.log(`  ${list.name}${stage ? `  → ${stage} agent` : ''}`);
 }
 console.log('\nLabels (a label named like a repo picks it):');

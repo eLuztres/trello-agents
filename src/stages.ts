@@ -29,7 +29,7 @@ function stageTask(stage: Stage, card: TrelloCard, baseBranch: string): string {
       ].join('\n');
     case 'build':
       return [
-        'Stage: BUILD. The chef approved the plan. Implement it (or continue it, and handle any chef comment above) following AGENTS.md.',
+        'Stage: BUILD. Implement this card (or continue it, and handle any chef comment above) following AGENTS.md.',
         'Run `npm run lint` and `npm run test` and fix what fails. Commit on the current branch with a clear message.',
         'End with a short summary of what changed and what the chef should check.',
       ].join('\n');
@@ -37,10 +37,11 @@ function stageTask(stage: Stage, card: TrelloCard, baseBranch: string): string {
       return [
         'Stage: TESTING. You are the reviewer and tech writer, not the author of this change.',
         `1. Review \`git diff ${baseBranch}...HEAD\` for bugs and AGENTS.md violations. Fix clear problems.`,
-        '2. Run `npm run lint` and `npm run test`. Fix failures.',
-        `3. Write \`docs/changes/card-${card.idShort}.md\` (what changed, why, how to test it by hand) and update existing docs the change affects.`,
-        '4. Commit on the current branch.',
-        'End with a report: verdict (ready / not ready), lint and test results, problems found and fixed, and what to check by hand.',
+        '2. Write the tests the change is missing (complex logic, server actions, bug fixes), following the repo\'s existing tests.',
+        '3. Run `npm run lint` and `npm run test`. Fix failures.',
+        `4. Write \`docs/changes/card-${card.idShort}.md\` (what changed, why, how to test it by hand) and update existing docs the change affects.`,
+        '5. Commit on the current branch.',
+        'End with a report: verdict (ready / not ready), tests added, lint and test results, problems found and fixed, and what to check by hand.',
       ].join('\n');
   }
 }

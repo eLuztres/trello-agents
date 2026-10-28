@@ -5,8 +5,8 @@ const WORKSPACE = path.resolve(import.meta.dirname, '..');
 
 export interface Config {
   boardId: string;
-  /** Trello list name for each automated stage. Other lists (like Done) stop the agent. */
-  lists: Record<Stage, string>;
+  /** Trello list names for each automated stage (the first is where cards are moved to); a stage without lists is skipped. Other lists (like Done) stop the agent. */
+  lists: Partial<Record<Stage, string[]>>;
   /** A card label with one of these names picks the repo, otherwise defaultRepo is used. */
   repos: Record<string, string>;
   defaultRepo: string;
@@ -21,7 +21,8 @@ export interface Config {
 
 export const CONFIG: Config = {
   boardId: 'd5Qaotvz',
-  lists: { plan: 'To Do', build: 'Doing', review: 'Testing' },
+  // To Do and Doing both build right away (no plan step); the builder moves the card to Testing when it's done.
+  lists: { build: ['To Do', 'Doing'], review: ['Testing'] },
   repos: {
     webStore: path.join(WORKSPACE, 'webStore'),
     custom: path.join(WORKSPACE, 'custom'),

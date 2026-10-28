@@ -24,17 +24,21 @@ interface Job {
 const state = loadState();
 const queue: Job[] = [];
 const running = new Map<string, AbortController>();
-let listIdByStage: Record<Stage, string>;
 let stageByListId: Record<string, Stage>;
 
-function resolveLists(lists: TrelloList[]): Record<Stage, string> {
-  const entries = Object.entries(CONFIG.lists).map(([stage, listName]) => {
-    const list = lists.find((candidate) => candidate.name === listName);
-    if (!list) throw new Error(`No list "${listName}" on the board. Lists: ${lists.map((l) => l.name).join(', ')}`);
-    return [stage, list.id];
-  });
-  return Object.fromEntries(entries) as Record<Stage, string>;
+function resolveLists(lists: TrelloList[]): Record<string, Stage> {
+  const entries = Object.entries(CONFIG.lists).flatMap(([stage, listNames]) =>
+    listNames.map((listName) => {
+      const list = lists.find((candidate) => candidate.name === listName);
+      if (!list) throw new Error(`No list "${listName}" on the board. Lists: ${lists.map((l) => l.name).join(', ')}`);
+      return [list.id, stage];
+    }),
+  );
+  return Object.fromEntries(entries);
 }
+
+/** The stage's first list, where cards are moved to. */
+const firstListId = (stage: Stage) => Object.keys(stageByListId).find((listId) => stageByListId[listId] === stage);
 
 async function poll(myMemberId: string): Promise<void> {
   const actions = (await trello.getBoardActions(CONFIG.boardId, state.lastActionId)).reverse();
@@ -162,7 +166,8 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
     notifyDesktop(`${title} ${status}`, card.name);
     console.log(`${title}: ${status}`);
 
-    if (result.isSuccess && stage === 'build') await trello.moveCard(card.id, listIdByStage.review);
+    const reviewListId = firstListId('review');
+    if (result.isSuccess && stage === 'build' && reviewListId) await trello.moveCard(card.id, reviewListId);
   } catch (error) {
     cardState.lastStatus = signal.aborted ? 'stopped' : 'failed';
     saveState(state);
@@ -176,10 +181,10 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
 
 function nextStepHint(stage: Stage, isSuccess: boolean): string {
   if (!isSuccess) return 'Next: comment to retry with instructions, or take over in the terminal.';
-  const { plan, build, review } = CONFIG.lists;
+  const [build, review] = [CONFIG.lists.build?.join(' or '), CONFIG.lists.review?.[0]];
   if (stage === 'plan') return `Next: comment to change the plan, or move the card to **${build}** to approve it.`;
   if (stage === 'build') return `Moving the card to **${review}** for review and docs.`;
-  return `Next: check the branch and move the card to **Done**, or back to **${build}** / **${plan}**.`;
+  return `Next: check the branch and move the card to **Done**, or back to **${build}** with a comment.`;
 }
 
 async function main(): Promise<void> {
@@ -187,8 +192,7 @@ async function main(): Promise<void> {
   mkdirSync(CONFIG.worktreeRoot, { recursive: true });
 
   const me = await trello.getMe();
-  listIdByStage = resolveLists(await trello.getLists(CONFIG.boardId));
-  stageByListId = Object.fromEntries(Object.entries(listIdByStage).map(([stage, listId]) => [listId, stage as Stage]));
+  stageByListId = resolveLists(await trello.getLists(CONFIG.boardId));
   console.log(`Watching board ${CONFIG.boardId} as @${me.username}. Only your own cards, moves and comments start agents.`);
 
   while (true) {
