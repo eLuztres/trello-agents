@@ -7,8 +7,12 @@ export interface Config {
   boardId: string;
   /** Trello list names for each automated stage (the first is where cards are moved to); a stage without lists is skipped. Other lists (like Done) stop the agent. */
   lists: Partial<Record<Stage, string[]>>;
+  /** A plan without open questions moves the card here (no agent); you move it on to build it. */
+  plannedList: string;
+  /** A plan with open questions moves the card back here; your answer as a comment plans it again. */
+  backlogList: string;
   /** A review with verdict "ready" moves the card here, to wait for your OK. */
-  readyList: string;
+  uncommittedList: string;
   /** A card label with one of these names picks the repo, otherwise defaultRepo is used. */
   repos: Record<string, string>;
   defaultRepo: string;
@@ -25,10 +29,12 @@ export interface Config {
 
 export const CONFIG: Config = {
   boardId: 'd5Qaotvz',
-  // To Do and Doing both build right away (no plan step); the builder moves the card to Testing when it's done.
+  // Planning ends in Ready (or Backlog with questions). To Do and Doing both build; the builder moves the card to Testing.
   // Uncommitted → Committed → Pushed: only your own moves commit and push, no agent runs there.
-  lists: { build: ['To Do', 'Doing'], review: ['Testing'], commit: ['Committed'], push: ['Pushed'] },
-  readyList: 'Uncommitted',
+  lists: { plan: ['Planning'], build: ['To Do', 'Doing'], review: ['Testing'], commit: ['Committed'], push: ['Pushed'] },
+  plannedList: 'Ready',
+  backlogList: 'Backlog',
+  uncommittedList: 'Uncommitted',
   repos: {
     webStore: path.join(WORKSPACE, 'webStore'),
     custom: path.join(WORKSPACE, 'custom'),

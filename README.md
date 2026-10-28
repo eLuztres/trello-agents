@@ -1,12 +1,15 @@
 # trello-agents
 
-Runs a Claude Code agent for each list on the Trello board. You are the chef: a card in To Do or Doing gets built right away, then reviewed. You give the OK to commit and to push by moving the card yourself. (A planning step exists too: give `plan` a list in `config.ts` to use it.)
+Runs a Claude Code agent for each list on the Trello board. You are the chef: a card in To Do or Doing gets built right away, then reviewed. You give the OK to commit and to push by moving the card yourself. Cards you want planned first go to Planning.
 
 | List | Agent | Permission mode | Output |
 | :--- | :--- | :--- | :--- |
+| **Backlog** | none | | Plans with open questions come back here. Your answer as a comment plans the card again |
+| **Planning** | Planner | `plan` (read-only) | Posts the plan. No open questions: moves the card to Ready. Questions: posts them and moves the card back to Backlog |
+| **Ready** | none, a resting list | | Planned, nothing left to ask. You move it to To Do. A comment here changes the plan |
 | **To Do** | Developer | `auto` | Commits on `card/<n>-<slug>`, then moves the card to Testing |
 | **Doing** | Developer, same as To Do | `auto` | |
-| **Testing** | Reviewer (fresh session) | `auto` | Fixes, missing tests, lint + tests, `docs/changes/card-<n>.md`, videos of front-end changes, report comment. Verdict "ready" moves the card to Uncommitted |
+| **Testing** | Reviewer (fresh session) | `auto` | Fixes, missing tests, lint + tests, `docs/changes/card-<n>.md`, report comment. Verdict "ready" moves the card to Uncommitted |
 | **Uncommitted** | none, waits for you | | The description gets **What changed**, the **Video** links and a proposed **Commit message** you can edit |
 | **Committed** | none, plain git (your move = OK to commit) | | Squashes the card branch into the target branch with the message from the description, comments the hash. Blocked (conflict, uncommitted changes in the main checkout): comments why and moves the card back |
 | **Pushed** | none, plain git (your move = OK to push) | | Pushes the target branch, waits for Vercel and comments the live URL or the failure, then removes the card's worktree and branch |
@@ -14,6 +17,7 @@ Runs a Claude Code agent for each list on the Trello board. You are the chef: a 
 
 - **Comment on a card** to talk to its agent. It re-runs the card's current stage with your comment (for example, "use the existing coupon validator").
 - **Move a card** to stop its running agent and start the new list's agent.
+- **Every UI change comes with a video.** Build and review record the changed pages on desktop and at 375px into `logs/videos/`. The daemon attaches them to the card and starts the report with "🎬 Video: <link>". Without a UI change the report starts with "🎬 Video: no UI change".
 - Only moves made by you into **Committed** and **Pushed** commit or push. Claude sessions use your Trello account too, so AGENTS.md tells them never to move a card there.
 - Every card gets its own git worktree in `../.worktrees/`, so cards run in parallel without touching your checkout. `node_modules` and `.env` are linked from the main repo.
 - A card labeled with a repo name (`custom`, `webStore`, …) works in that repo. Any other card works in `shop-baifo` (`defaultRepo` in `config.ts`). Cards labeled `manual` never start an agent.

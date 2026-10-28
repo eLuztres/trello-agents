@@ -30,6 +30,10 @@ describe('description hand-over', () => {
     assert.equal(readVerdict('no verdict here'), undefined);
   });
 
+  it('reads a plan verdict with open questions', () => {
+    assert.equal(readVerdict('## Plan\n…\nVerdict: questions'), 'questions');
+  });
+
   it('reads a section up to the next heading', () => {
     assert.equal(readSection(REPORT, 'What changed'), 'The cart shows the total.');
     assert.equal(readSection(REPORT, 'Missing'), undefined);

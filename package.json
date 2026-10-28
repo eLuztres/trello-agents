@@ -2,7 +2,7 @@
   "name": "trello-agents",
   "private": true,
   "type": "module",
-  "description": "Runs a Claude Code agent for each Trello list: plan in To Do, build in Doing, review and docs in Testing.",
+  "description": "Runs a Claude Code agent for each Trello list: plan in Planning, build in To Do and Doing, review and docs in Testing.",
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning --env-file=.env src/index.ts",
     "lists": "node --disable-warning=ExperimentalWarning --env-file=.env src/lists.ts",

@@ -12,7 +12,12 @@ console.log(`Signed in as @${me.username}\n`);
 console.log('Lists:');
 for (const list of lists) {
   const stage = Object.entries(CONFIG.lists).find(([, names]) => names.includes(list.name))?.[0];
-  const role = stage ? `  → ${stage}` : list.name === CONFIG.readyList ? '  → ready reviews wait here' : '';
+  const restingRoles: Record<string, string> = {
+    [CONFIG.plannedList]: '  → finished plans rest here',
+    [CONFIG.backlogList]: '  → plans with questions come back here',
+    [CONFIG.uncommittedList]: '  → ready reviews wait here',
+  };
+  const role = stage ? `  → ${stage}` : (restingRoles[list.name] ?? '');
   console.log(`  ${list.name}${role}`);
 }
 console.log('\nLabels (a label named like a repo picks it):');

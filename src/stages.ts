@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { CONFIG } from '../config.ts';
 import type { PermissionMode } from './claude.ts';
 import type { AgentStage, Stage } from './events.ts';
 import type { CardState } from './state.ts';
@@ -15,7 +16,7 @@ export interface StageRun {
 
 export const STAGE_TITLES: Record<Stage, string> = { plan: 'Planning', build: 'Building', review: 'Testing & docs', commit: 'Committing', push: 'Pushing' };
 
-/** The reviewer records here, outside the worktree so the videos never get committed. */
+/** Build and review record here, outside the worktree so the videos never get committed. */
 export const VIDEO_DIR = path.resolve(import.meta.dirname, '..', 'logs', 'videos');
 
 export const SYSTEM_PROMPT = [
@@ -24,17 +25,28 @@ export const SYSTEM_PROMPT = [
   'Your final message is posted as a Trello comment: keep it clear, and list your assumptions and open questions there.',
 ].join(' ');
 
+/** The daemon attaches the recorded files to the card and links them at the top of the comment. */
+function videoRule(card: TrelloCard): string {
+  return [
+    `UI change? Record the changed pages with Playwright (\`recordVideo\`, a few seconds each, save with \`page.video().saveAs()\`; a GIF is fine too): desktop to \`${VIDEO_DIR}/card-${card.idShort}-desktop.webm\` and 375px phone width to \`${VIDEO_DIR}/card-${card.idShort}-phone.webm\`.`,
+    'The daemon uploads them to the card and puts "🎬 Video: <link>" at the top of your comment. No visible change? Start your final message with "🎬 Video: no UI change".',
+  ].join(' ');
+}
+
 function stageTask(stage: AgentStage, card: TrelloCard, baseBranch: string): string {
   switch (stage) {
     case 'plan':
       return [
         'Stage: PLAN (read-only). Explore the code and write an implementation plan for this card. Do not change any files.',
         'End with the complete plan in Markdown as your final message: goal, files to change, steps, tests, open questions.',
+        `Ask only what you cannot decide yourself. Finish with \`Verdict: ready\` on its own line when nothing is left to ask the chef (the card moves to ${CONFIG.plannedList}),`,
+        `or \`Verdict: questions\` when the chef must answer something first (the card moves back to ${CONFIG.backlogList} until the chef answers in a comment).`,
       ].join('\n');
     case 'build':
       return [
         'Stage: BUILD. Implement this card (or continue it, and handle any chef comment above) following AGENTS.md.',
         'Run `npm run lint` and `npm run test` and fix what fails. Commit on the current branch with a clear message.',
+        videoRule(card),
         'End with a short summary of what changed and what the chef should check.',
       ].join('\n');
     case 'review':
@@ -45,7 +57,7 @@ function stageTask(stage: AgentStage, card: TrelloCard, baseBranch: string): str
         '3. Run `npm run lint` and `npm run test`. Fix failures.',
         `4. Write \`docs/changes/card-${card.idShort}.md\` (what changed, why, how to test it by hand) and update existing docs the change affects.`,
         '5. Commit on the current branch.',
-        `6. Front-end change? Record the pages you checked with Playwright (\`recordVideo\`, a few seconds each, save with \`page.video().saveAs()\`): desktop to \`${VIDEO_DIR}/card-${card.idShort}-desktop.webm\` and 375px phone width to \`${VIDEO_DIR}/card-${card.idShort}-phone.webm\`. Skip this when nothing visible changed.`,
+        `6. ${videoRule(card)}`,
         'End with a report: tests added, lint and test results, problems found and fixed, and what to check by hand. Finish the report with exactly these three parts, in this order:',
         '`Verdict: ready` or `Verdict: not ready` on its own line.',
         '`## What changed` followed by 3-5 plain lines for the chef, without code.',

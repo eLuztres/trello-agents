@@ -14,19 +14,19 @@ import { waitForDeployment, type DeployResult } from './vercel.ts';
 const targetBranchOf = (cardState: CardState) => CONFIG.targetBranches[cardState.repo] ?? CONFIG.baseBranch;
 
 /** After a "ready" review: writes What changed, the videos and the commit message into the description. */
-export async function handOverReview(card: TrelloCard, report: string, readyListId: string): Promise<void> {
+export async function handOverReview(card: TrelloCard, report: string, videoLinks: string[], readyListId: string): Promise<void> {
   const handOver = readHandOver(report);
   if (!handOver) {
     await trello.addComment(card.id, `${BOT_PREFIX} The review is ready, but its report has no "What changed" or "Commit message" section. Write the commit message under \`## Commit message\` in the description before moving the card to Committed.`);
   }
-  const videoLinks = await attachVideos(card);
   // Fresh copy: you may have edited the description while the review ran.
   const { desc } = await trello.getCard(card.id);
   if (handOver) await trello.setDescription(card.id, withHandOver(desc, { ...handOver, videoLinks }));
   await trello.moveCard(card.id, readyListId);
 }
 
-async function attachVideos(card: TrelloCard): Promise<string[]> {
+/** Uploads the videos a build or review recorded and returns Markdown links to them. */
+export async function attachVideos(card: TrelloCard): Promise<string[]> {
   const prefix = `card-${card.idShort}-`;
   const files = (await readdir(VIDEO_DIR).catch(() => [])).filter((name) => name.startsWith(prefix));
   const links: string[] = [];

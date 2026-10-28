@@ -5,7 +5,8 @@ const VIDEO = 'Video';
 const COMMIT_MESSAGE = 'Commit message';
 const FENCE_LINE = /^```.*$/gm;
 
-export type Verdict = 'ready' | 'not ready';
+/** Reviews end in ready / not ready, plans in ready / questions. */
+export type Verdict = 'ready' | 'not ready' | 'questions';
 
 export interface ReviewHandOver {
   whatChanged: string;
@@ -32,7 +33,7 @@ export function readCommitMessage(description: string): string | undefined {
 }
 
 export function readVerdict(report: string): Verdict | undefined {
-  const match = report.match(/^[*_\s]*verdict[*_\s]*:[*_\s]*(not ready|ready)/im);
+  const match = report.match(/^[*_\s]*verdict[*_\s]*:[*_\s]*(not ready|ready|questions)/im);
   return match?.[1].toLowerCase() as Verdict | undefined;
 }
 
