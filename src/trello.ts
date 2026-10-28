@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 const API_URL = 'https://api.trello.com/1';
@@ -39,10 +41,10 @@ function authHeader(): string {
   return `OAuth oauth_consumer_key="${key}", oauth_token="${token}"`;
 }
 
-async function request<T>(method: 'GET' | 'POST' | 'PUT', path: string, params: Record<string, string> = {}): Promise<T> {
+async function request<T>(method: 'GET' | 'POST' | 'PUT', path: string, params: Record<string, string> | FormData = {}): Promise<T> {
   const url = new URL(API_URL + path);
   const isGet = method === 'GET';
-  if (isGet) Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+  if (isGet && !(params instanceof FormData)) Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
 
   for (let attempt = 1; ; attempt++) {
     const isLastAttempt = attempt === MAX_ATTEMPTS;
@@ -51,7 +53,7 @@ async function request<T>(method: 'GET' | 'POST' | 'PUT', path: string, params: 
       response = await fetch(url, {
         method,
         headers: { Authorization: authHeader(), Accept: 'application/json' },
-        body: isGet ? undefined : new URLSearchParams(params),
+        body: isGet ? undefined : params instanceof FormData ? params : new URLSearchParams(params),
       });
     } catch (error) {
       // Usually a kept-alive socket Trello closed while an agent was working.
@@ -96,4 +98,12 @@ export const trello = {
   addComment: (cardId: string, text: string) => request('POST', `/cards/${cardId}/actions/comments`, { text }),
 
   moveCard: (cardId: string, listId: string) => request('PUT', `/cards/${cardId}`, { idList: listId }),
+
+  setDescription: (cardId: string, desc: string) => request('PUT', `/cards/${cardId}`, { desc }),
+
+  attachFile: async (cardId: string, filePath: string) => {
+    const form = new FormData();
+    form.set('file', new Blob([await readFile(filePath)]), path.basename(filePath));
+    return request<{ url: string; name: string }>('POST', `/cards/${cardId}/attachments`, form);
+  },
 };

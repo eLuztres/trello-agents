@@ -8,7 +8,7 @@ const execFileAsync = promisify(execFile);
 // Linked instead of installed per card: fast, and lint/tests work. Both are gitignored in the repos.
 const SHARED_FROM_REPO = ['node_modules', '.env'];
 
-async function git(cwd: string, args: string[]): Promise<string> {
+export async function git(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync('git', args, { cwd });
   return stdout;
 }

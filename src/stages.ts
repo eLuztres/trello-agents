@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type { PermissionMode } from './claude.ts';
-import type { Stage } from './events.ts';
+import type { AgentStage, Stage } from './events.ts';
 import type { CardState } from './state.ts';
 import type { TrelloCard } from './trello.ts';
 
@@ -12,7 +13,10 @@ export interface StageRun {
   disallowedTools: string[];
 }
 
-export const STAGE_TITLES: Record<Stage, string> = { plan: 'Planning', build: 'Building', review: 'Testing & docs' };
+export const STAGE_TITLES: Record<Stage, string> = { plan: 'Planning', build: 'Building', review: 'Testing & docs', commit: 'Committing', push: 'Pushing' };
+
+/** The reviewer records here, outside the worktree so the videos never get committed. */
+export const VIDEO_DIR = path.resolve(import.meta.dirname, '..', 'logs', 'videos');
 
 export const SYSTEM_PROMPT = [
   'You are a developer agent started by a Trello board automation. The chef (the repo owner) steers you through the card.',
@@ -20,7 +24,7 @@ export const SYSTEM_PROMPT = [
   'Your final message is posted as a Trello comment: keep it clear, and list your assumptions and open questions there.',
 ].join(' ');
 
-function stageTask(stage: Stage, card: TrelloCard, baseBranch: string): string {
+function stageTask(stage: AgentStage, card: TrelloCard, baseBranch: string): string {
   switch (stage) {
     case 'plan':
       return [
@@ -41,7 +45,11 @@ function stageTask(stage: Stage, card: TrelloCard, baseBranch: string): string {
         '3. Run `npm run lint` and `npm run test`. Fix failures.',
         `4. Write \`docs/changes/card-${card.idShort}.md\` (what changed, why, how to test it by hand) and update existing docs the change affects.`,
         '5. Commit on the current branch.',
-        'End with a report: verdict (ready / not ready), tests added, lint and test results, problems found and fixed, and what to check by hand.',
+        `6. Front-end change? Record the pages you checked with Playwright (\`recordVideo\`, a few seconds each, save with \`page.video().saveAs()\`): desktop to \`${VIDEO_DIR}/card-${card.idShort}-desktop.webm\` and 375px phone width to \`${VIDEO_DIR}/card-${card.idShort}-phone.webm\`. Skip this when nothing visible changed.`,
+        'End with a report: tests added, lint and test results, problems found and fixed, and what to check by hand. Finish the report with exactly these three parts, in this order:',
+        '`Verdict: ready` or `Verdict: not ready` on its own line.',
+        '`## What changed` followed by 3-5 plain lines for the chef, without code.',
+        '`## Commit message` followed by a ``` block with the proposed message: a short subject line, a blank line, then a few "- " lines. Nothing after the block.',
       ].join('\n');
   }
 }
@@ -58,7 +66,7 @@ function cardBrief(card: TrelloCard, cardState: CardState, baseBranch: string): 
 }
 
 /** Plan and build share a session; review starts fresh unless it's answering a comment. */
-export function planStageRun(stage: Stage, card: TrelloCard, cardState: CardState, baseBranch: string, feedback?: string): StageRun {
+export function planStageRun(stage: AgentStage, card: TrelloCard, cardState: CardState, baseBranch: string, feedback?: string): StageRun {
   const existingSessionId = stage === 'review' ? (feedback ? cardState.reviewSessionId : undefined) : cardState.devSessionId;
   const shouldResume = Boolean(existingSessionId);
 

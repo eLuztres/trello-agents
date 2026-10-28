@@ -1,6 +1,11 @@
 import type { TrelloAction } from './trello.ts';
 
-export type Stage = 'plan' | 'build' | 'review';
+export type AgentStage = 'plan' | 'build' | 'review';
+/** Plain git, no agent: your own move into their list is your OK to commit or push. */
+export type GitStage = 'commit' | 'push';
+export type Stage = AgentStage | GitStage;
+
+export const isGitStage = (stage: Stage): stage is GitStage => stage === 'commit' || stage === 'push';
 
 /** Marks comments written by the agents, so they don't trigger new runs. */
 export const BOT_PREFIX = '🤖';

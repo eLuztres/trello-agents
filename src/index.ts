@@ -4,9 +4,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { CONFIG } from '../config.ts';
 import { pickRepo, toBranchName } from './card.ts';
 import { runClaude } from './claude.ts';
-import { BOT_PREFIX, toCardEvent, type CardEvent, type Stage } from './events.ts';
+import { readVerdict } from './description.ts';
+import { BOT_PREFIX, isGitStage, toCardEvent, type AgentStage, type CardEvent, type GitStage, type Stage } from './events.ts';
 import { notifyDesktop } from './notify.ts';
-import { STAGE_TITLES, SYSTEM_PROMPT, planStageRun } from './stages.ts';
+import { commitCard, handOverReview, pushCard } from './ship.ts';
+import { STAGE_TITLES, SYSTEM_PROMPT, VIDEO_DIR, planStageRun } from './stages.ts';
 import { loadState, saveState, type CardState } from './state.ts';
 import { trello, type TrelloCard, type TrelloList } from './trello.ts';
 import { commitLeftovers, ensureWorktree } from './worktree.ts';
@@ -25,14 +27,17 @@ const state = loadState();
 const queue: Job[] = [];
 const running = new Map<string, AbortController>();
 let stageByListId: Record<string, Stage>;
+let readyListId: string;
+
+function findList(lists: TrelloList[], listName: string): TrelloList {
+  const list = lists.find((candidate) => candidate.name === listName);
+  if (!list) throw new Error(`No list "${listName}" on the board. Lists: ${lists.map((l) => l.name).join(', ')}`);
+  return list;
+}
 
 function resolveLists(lists: TrelloList[]): Record<string, Stage> {
   const entries = Object.entries(CONFIG.lists).flatMap(([stage, listNames]) =>
-    listNames.map((listName) => {
-      const list = lists.find((candidate) => candidate.name === listName);
-      if (!list) throw new Error(`No list "${listName}" on the board. Lists: ${lists.map((l) => l.name).join(', ')}`);
-      return [list.id, stage];
-    }),
+    listNames.map((listName) => [findList(lists, listName).id, stage]),
   );
   return Object.fromEntries(entries);
 }
@@ -122,6 +127,11 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
   }
 
   const cardState = ensureCardState(card);
+  if (isGitStage(stage)) {
+    // Comments never commit or push: only your move into the list does.
+    if (job.stage) await runGitStage(stage, card, cardState, signal);
+    return;
+  }
   const title = `#${card.idShort} ${STAGE_TITLES[stage]}`;
   const logFile = path.join(LOG_DIR, `card-${card.idShort}.log`);
   const run = planStageRun(stage, card, cardState, CONFIG.baseBranch, job.feedback);
@@ -151,6 +161,7 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
     if (stage !== 'plan') await commitLeftovers(cardState.worktree, `card #${card.idShort}: ${stage} leftovers`);
 
     const status = result.isSuccess ? 'done' : 'failed';
+    const isReady = stage === 'review' && result.isSuccess && readVerdict(result.text) === 'ready';
     cardState.lastStatus = status;
     saveState(state);
 
@@ -160,7 +171,7 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
       [
         `${BOT_PREFIX} **${STAGE_TITLES[stage]} ${status}** · $${result.costUsd.toFixed(2)}`,
         report,
-        `---\nBranch \`${cardState.branch}\` · take over: \`${takeOver}\`\n${nextStepHint(stage, result.isSuccess)}`,
+        `---\nBranch \`${cardState.branch}\` · take over: \`${takeOver}\`\n${nextStepHint(stage, result.isSuccess, isReady)}`,
       ].join('\n\n'),
     );
     notifyDesktop(`${title} ${status}`, card.name);
@@ -168,6 +179,7 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
 
     const reviewListId = firstListId('review');
     if (result.isSuccess && stage === 'build' && reviewListId) await trello.moveCard(card.id, reviewListId);
+    if (isReady) await handOverReview(card, result.text, readyListId);
   } catch (error) {
     cardState.lastStatus = signal.aborted ? 'stopped' : 'failed';
     saveState(state);
@@ -179,20 +191,39 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
   }
 }
 
-function nextStepHint(stage: Stage, isSuccess: boolean): string {
+async function runGitStage(stage: GitStage, card: TrelloCard, cardState: CardState, signal: AbortSignal): Promise<void> {
+  cardState.lastStage = stage;
+  cardState.lastStatus = 'running';
+  saveState(state);
+  console.log(`#${card.idShort} ${STAGE_TITLES[stage]}`);
+
+  const committedListId = firstListId('commit');
+  const isDone =
+    stage === 'commit'
+      ? await commitCard(card, cardState, readyListId)
+      : committedListId && (await pushCard(card, cardState, readyListId, committedListId, signal));
+  cardState.lastStatus = isDone ? 'done' : 'failed';
+  saveState(state);
+}
+
+function nextStepHint(stage: AgentStage, isSuccess: boolean, isReady: boolean): string {
   if (!isSuccess) return 'Next: comment to retry with instructions, or take over in the terminal.';
-  const [build, review] = [CONFIG.lists.build?.join(' or '), CONFIG.lists.review?.[0]];
+  const [build, review, commit] = [CONFIG.lists.build?.join(' or '), CONFIG.lists.review?.[0], CONFIG.lists.commit?.[0]];
   if (stage === 'plan') return `Next: comment to change the plan, or move the card to **${build}** to approve it.`;
   if (stage === 'build') return `Moving the card to **${review}** for review and docs.`;
-  return `Next: check the branch and move the card to **Done**, or back to **${build}** with a comment.`;
+  if (isReady) return `Moving the card to **${CONFIG.readyList}**. Check the description and edit the commit message there if you like, then move the card to **${commit}** to commit it.`;
+  return `Not ready: comment what to change, or move the card back to **${build}** with a comment.`;
 }
 
 async function main(): Promise<void> {
   mkdirSync(LOG_DIR, { recursive: true });
   mkdirSync(CONFIG.worktreeRoot, { recursive: true });
+  mkdirSync(VIDEO_DIR, { recursive: true });
 
   const me = await trello.getMe();
-  stageByListId = resolveLists(await trello.getLists(CONFIG.boardId));
+  const lists = await trello.getLists(CONFIG.boardId);
+  stageByListId = resolveLists(lists);
+  readyListId = findList(lists, CONFIG.readyList).id;
   console.log(`Watching board ${CONFIG.boardId} as @${me.username}. Only your own cards, moves and comments start agents.`);
 
   while (true) {

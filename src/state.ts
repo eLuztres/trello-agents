@@ -13,6 +13,8 @@ export interface CardState {
   devSessionId?: string;
   /** The reviewer gets its own session for a fresh look at the diff. */
   reviewSessionId?: string;
+  /** Set by the commit stage; the push stage needs it. */
+  commitHash?: string;
   lastStage?: string;
   lastStatus?: 'running' | 'done' | 'failed' | 'stopped';
 }
