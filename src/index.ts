@@ -335,6 +335,21 @@ function nextStepHint(stage: AgentStage, isSuccess: boolean, isReady: boolean): 
   return `Not ready: comment what to change, or move the card back to **${build}** with a comment.`;
 }
 
+/** A restart forgets the queue: jobs that were cut off start again, and finished builds still get their review. */
+async function resumeAfterRestart(): Promise<void> {
+  const reviewListId = firstListId('review');
+  for (const [cardId, cardState] of Object.entries(state.cards)) {
+    const stage = cardState.lastStage as Stage | undefined;
+    const isCutOff = cardState.lastStatus === 'running';
+    const awaitsReview = stage === 'build' && cardState.lastStatus === 'done';
+    if (!stage || isGitStage(stage) || stage === 'chat' || (!isCutOff && !awaitsReview)) continue;
+    const card = await trello.getCard(cardId).catch(() => undefined);
+    if (card && isCutOff && stageByListId[card.idList] === stage) queue.push({ cardId, stage });
+    else if (card && awaitsReview && card.idList === reviewListId) queue.push({ cardId, stage: 'review' });
+  }
+  startQueuedJobs();
+}
+
 async function findOrCreateLabel(name: string, color: string): Promise<string> {
   const existing = (await trello.getLabels(CONFIG.boardId)).find((label) => label.name === name);
   return existing?.id ?? (await trello.createLabel(CONFIG.boardId, name, color)).id;
@@ -355,6 +370,10 @@ async function main(): Promise<void> {
   aiListIds = new Set(CONFIG.aiLists.map((listName) => findList(lists, listName).id));
   workingLabelId = await findOrCreateLabel(CONFIG.workingLabel.name, CONFIG.workingLabel.color);
   console.log(`Watching board ${CONFIG.boardId} as @${me.username}. Only your own cards, moves and comments start agents.`);
+
+  // The moves made before this start can't be told apart from yours, so skip them and pick the work up from the saved state.
+  state.lastActionId = undefined;
+  await resumeAfterRestart();
 
   while (true) {
     try {
