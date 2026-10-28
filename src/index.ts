@@ -6,6 +6,7 @@ import { pickRepo, toBranchName } from './card.ts';
 import { runClaude } from './claude.ts';
 import { readVerdict } from './description.ts';
 import { BOT_PREFIX, isGitStage, replanStage, toCardEvent, type AgentStage, type CardEvent, type GitStage, type Stage } from './events.ts';
+import { numberCard } from './numbering.ts';
 import { notifyDesktop } from './notify.ts';
 import { attachVideos, commitCard, handOverReview, pushCard } from './ship.ts';
 import { STAGE_TITLES, SYSTEM_PROMPT, VIDEO_DIR, planStageRun, takeBuildRequest } from './stages.ts';
@@ -58,8 +59,12 @@ async function poll(myMemberId: string): Promise<void> {
     return;
   }
 
+  // Trello's `since` already filters by date. Ids made in the same second aren't ordered,
+  // so comparing them skipped a card's move that came with its report comment.
+  const sinceActionId = state.lastActionId;
   for (const action of actions) {
-    if (action.id <= state.lastActionId) continue;
+    if (action.id === sinceActionId) continue;
+    if (action.type === 'createCard' && action.data.card) numberCard(action.data.card.id).catch((error: Error) => console.error(`Numbering failed: ${error.message}`));
     const event = toCardEvent(action, stageByListId, myMemberId);
     if (event?.kind === 'commented') await sendReceipt(event.cardId);
     if (event) schedule(event);

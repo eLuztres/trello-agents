@@ -110,4 +110,8 @@ export const trello = {
     form.set('file', new Blob([await readFile(filePath)]), path.basename(filePath));
     return request<{ url: string; name: string }>('POST', `/cards/${cardId}/attachments`, form);
   },
+
+  renameCard: (cardId: string, name: string) => request('PUT', `/cards/${cardId}`, { name }),
+
+  getOpenCards: (boardId: string) => request<TrelloCard[]>('GET', `/boards/${boardId}/cards/open`, { fields: 'idShort,name' }),
 };

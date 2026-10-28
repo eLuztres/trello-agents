@@ -1,7 +1,9 @@
 const MAX_SLUG_LENGTH = 40;
 
 export function toBranchName(idShort: number, cardName: string): string {
+  // The "#123 " in front of the name is already in the branch.
   const slug = cardName
+    .replace(/^#\d+\s+/, '')
     .toLowerCase()
     .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '')
