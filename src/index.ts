@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { CONFIG } from '../config.ts';
@@ -6,13 +6,14 @@ import { pickRepo, toBranchName } from './card.ts';
 import { runClaude } from './claude.ts';
 import { BOT_PREFIX, toCardEvent, type CardEvent, type Stage } from './events.ts';
 import { notifyDesktop } from './notify.ts';
-import { STAGE_TITLES, SYSTEM_PROMPT, planStageRun } from './stages.ts';
+import { STAGE_TITLES, SYSTEM_PROMPT, planStageRun, takeBuildRequest } from './stages.ts';
 import { loadState, saveState, type CardState } from './state.ts';
 import { trello, type TrelloCard, type TrelloList } from './trello.ts';
 import { commitLeftovers, ensureWorktree } from './worktree.ts';
 
 const LOG_DIR = path.resolve(import.meta.dirname, '..', 'logs');
 const MAX_COMMENT_LENGTH = 15_000; // Trello's limit is 16384
+const RECEIPT = `${BOT_PREFIX} Got it, looking at it…`;
 
 interface Job {
   cardId: string;
@@ -53,11 +54,17 @@ async function poll(myMemberId: string): Promise<void> {
   for (const action of actions) {
     if (action.id <= state.lastActionId) continue;
     const event = toCardEvent(action, stageByListId, myMemberId);
+    if (event?.kind === 'commented') await sendReceipt(event.cardId);
     if (event) schedule(event);
     state.lastActionId = action.id;
   }
   saveState(state);
   startQueuedJobs();
+}
+
+/** Tells you right away that a comment was heard, even if the card waits for a running job. */
+async function sendReceipt(cardId: string): Promise<void> {
+  await trello.addComment(cardId, RECEIPT).catch((error: Error) => console.error(`Card ${cardId}: receipt failed: ${error.message}`));
 }
 
 function schedule(event: CardEvent): void {
@@ -113,8 +120,12 @@ function ensureCardState(card: TrelloCard): CardState {
 
 async function runJob(job: Job, signal: AbortSignal): Promise<void> {
   const card = await trello.getCard(job.cardId);
-  const stage = job.stage ?? stageByListId[card.idList];
+  // Comments on cards outside the automated lists (Backlog, Done, …) get a read-only chat reply.
+  const stage = job.stage ?? stageByListId[card.idList] ?? (job.feedback ? 'chat' : undefined);
   if (!stage) return;
+
+  // Chat is read-only, so it answers on manual cards too.
+  if (stage === 'chat') return runChat(card, job.feedback ?? '', signal);
 
   if (card.labels.some((label) => CONFIG.manualLabels.includes(label.name.toLowerCase()))) {
     await trello.addComment(card.id, `${BOT_PREFIX} This card is labeled for manual work, so no agent starts. Move it on yourself when it's done.`);
@@ -124,7 +135,7 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
   const cardState = ensureCardState(card);
   const title = `#${card.idShort} ${STAGE_TITLES[stage]}`;
   const logFile = path.join(LOG_DIR, `card-${card.idShort}.log`);
-  const run = planStageRun(stage, card, cardState, CONFIG.baseBranch, job.feedback);
+  const run = planStageRun(stage, card, cardState, CONFIG.baseBranch, await getCommentTexts(card.id), job.feedback);
   const takeOver = `cd ${cardState.worktree} && claude --resume ${run.sessionId}`;
 
   cardState.lastStage = stage;
@@ -175,6 +186,40 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
 
     await trello.addComment(card.id, `${BOT_PREFIX} **${STAGE_TITLES[stage]} failed** before finishing. See \`${logFile}\` and the daemon output.`);
     notifyDesktop(`${title} failed`, card.name);
+    throw error;
+  }
+}
+
+async function getCommentTexts(cardId: string): Promise<string[]> {
+  return (await trello.getComments(cardId)).map((comment) => comment.data.text ?? '');
+}
+
+/** Answers a comment without touching code: in the card's worktree if it has one, else in the repo checkout. */
+async function runChat(card: TrelloCard, feedback: string, signal: AbortSignal): Promise<void> {
+  const cardState = ensureCardState(card);
+  const title = `#${card.idShort} ${STAGE_TITLES.chat}`;
+  const logFile = path.join(LOG_DIR, `card-${card.idShort}.log`);
+  const run = planStageRun('chat', card, cardState, CONFIG.baseBranch, await getCommentTexts(card.id), feedback);
+  const cwd = existsSync(cardState.worktree) ? cardState.worktree : CONFIG.repos[cardState.repo];
+  console.log(`${title}: started (log: ${logFile})`);
+
+  try {
+    const result = await runClaude(
+      { ...run, cwd, maxBudgetUsd: CONFIG.maxBudgetUsd.chat, appendSystemPrompt: SYSTEM_PROMPT, logFile },
+      signal,
+    );
+    const { text, shouldBuild } = takeBuildRequest(result.text);
+    const buildListId = result.isSuccess && shouldBuild ? firstListId('build') : undefined;
+    const status = result.isSuccess ? '' : ' failed';
+    const moveNote = buildListId ? `\n\nMoving the card to **${CONFIG.lists.build?.[0]}**.` : '';
+    await trello.addComment(card.id, `${BOT_PREFIX} **Chat${status}** · $${result.costUsd.toFixed(2)}\n\n${text.slice(0, MAX_COMMENT_LENGTH)}${moveNote}`);
+    console.log(`${title}: ${result.isSuccess ? 'done' : 'failed'}`);
+
+    // The move shows up as your own action in the next poll, which starts the build.
+    if (buildListId) await trello.moveCard(card.id, buildListId);
+  } catch (error) {
+    if (signal.aborted) return console.log(`${title}: stopped because the card moved`);
+    await trello.addComment(card.id, `${BOT_PREFIX} **Chat failed** before answering. See \`${logFile}\` and the daemon output.`);
     throw error;
   }
 }

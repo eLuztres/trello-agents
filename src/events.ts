@@ -1,6 +1,7 @@
 import type { TrelloAction } from './trello.ts';
 
-export type Stage = 'plan' | 'build' | 'review';
+/** `chat` answers comments on cards outside the automated lists. */
+export type Stage = 'plan' | 'build' | 'review' | 'chat';
 
 /** Marks comments written by the agents, so they don't trigger new runs. */
 export const BOT_PREFIX = '🤖';
