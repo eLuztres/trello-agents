@@ -190,8 +190,10 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
   }
 }
 
+/** Leaves out the receipts: they only repeat "Got it" in the agent's brief. */
 async function getCommentTexts(cardId: string): Promise<string[]> {
-  return (await trello.getComments(cardId)).map((comment) => comment.data.text ?? '');
+  const texts = (await trello.getComments(cardId)).map((comment) => comment.data.text ?? '');
+  return texts.filter((text) => text !== RECEIPT);
 }
 
 /** Answers a comment without touching code: in the card's worktree if it has one, else in the repo checkout. */

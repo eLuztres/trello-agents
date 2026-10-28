@@ -84,7 +84,8 @@ function formatComment(text: string): string {
 /** Strips the chat agent's build marker from its reply and tells whether it was there. */
 export function takeBuildRequest(text: string): { text: string; shouldBuild: boolean } {
   const lines = text.trimEnd().split('\n');
-  const shouldBuild = lines.at(-1)?.trim() === BUILD_MARKER;
+  // The prompt shows the marker in backticks, so agents sometimes copy them.
+  const shouldBuild = lines.at(-1)?.trim().replace(/^`|`$/g, '') === BUILD_MARKER;
   return { text: shouldBuild ? lines.slice(0, -1).join('\n').trimEnd() : text, shouldBuild };
 }
 

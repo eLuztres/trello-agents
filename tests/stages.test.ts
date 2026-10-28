@@ -17,6 +17,10 @@ describe('takeBuildRequest', () => {
     assert.deepEqual(takeBuildRequest(text), { text, shouldBuild: false });
   });
 
+  it('accepts the marker in backticks, as the prompt shows it', () => {
+    assert.deepEqual(takeBuildRequest(`On it.\n\`${BUILD_MARKER}\``), { text: 'On it.', shouldBuild: true });
+  });
+
   it('ignores the marker when it is not the last line', () => {
     assert.equal(takeBuildRequest(`${BUILD_MARKER}\nbut not yet`).shouldBuild, false);
   });
@@ -38,5 +42,34 @@ describe('planStageRun', () => {
     assert.equal(run.shouldResume, true);
     assert.equal(run.sessionId, 'dev-session');
     assert.match(run.prompt, /use Zod\nStart your final message by answering this comment directly/);
+  });
+
+  it('starts review fresh, but resumes its session to answer a comment', () => {
+    const cardState = { ...CARD_STATE, reviewSessionId: 'review-session' };
+    assert.equal(planStageRun('review', CARD, cardState, 'main', []).shouldResume, false);
+    const run = planStageRun('review', CARD, cardState, 'main', [], 'add a test');
+    assert.equal(run.sessionId, 'review-session');
+    assert.equal(run.permissionMode, 'auto');
+    assert.ok(!run.disallowedTools.includes('Edit'));
+  });
+
+  it('does not ask chat to answer first, it only answers', () => {
+    const run = planStageRun('chat', CARD, CARD_STATE, 'main', [], 'why?');
+    assert.doesNotMatch(run.prompt, /Start your final message by answering/);
+  });
+
+  it('keeps only the 20 newest comments and shortens long ones', () => {
+    const comments = Array.from({ length: 25 }, (_, index) => `comment ${index}`);
+    comments[0] = 'x'.repeat(2500);
+    const run = planStageRun('chat', CARD, CARD_STATE, 'main', comments, 'hi');
+    assert.match(run.prompt, /comment 19\n/);
+    assert.doesNotMatch(run.prompt, /comment 20\n/);
+    assert.match(run.prompt, /- x{2000} …/);
+    assert.doesNotMatch(run.prompt, /x{2001}/);
+  });
+
+  it('leaves out the comments section when there are none', () => {
+    const run = planStageRun('chat', CARD, CARD_STATE, 'main', [], 'hi');
+    assert.doesNotMatch(run.prompt, /Comments so far/);
   });
 });
