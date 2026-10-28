@@ -82,9 +82,9 @@ describe('squashIntoTarget', () => {
   commitFile('b.txt', 'new\n');
   git('checkout', '-q', 'main');
 
-  it('refuses when the checkout has uncommitted changes', async () => {
+  it('refuses when a file the card changes has uncommitted changes', async () => {
     writeFileSync(path.join(root, 'a.txt'), 'dirty\n');
-    await assert.rejects(squashIntoTarget(root, 'card/1', 'main', 'msg'), ShipBlockedError);
+    await assert.rejects(squashIntoTarget(root, 'card/1', 'main', 'msg'), /files this card changes[\s\S]*a\.txt/);
     git('checkout', '--', 'a.txt');
   });
 
@@ -104,6 +104,22 @@ describe('squashIntoTarget', () => {
 
   it('refuses when there is nothing left to commit', async () => {
     await assert.rejects(squashIntoTarget(root, 'card/1', 'main', 'again'), /Nothing to commit/);
+  });
+
+  it('commits next to unrelated uncommitted work and leaves it alone', async () => {
+    commitFile('other.txt', 'base\n');
+    git('checkout', '-qb', 'card/4', 'main');
+    commitFile('card-4.txt', 'new\n');
+    git('checkout', '-q', 'main');
+    writeFileSync(path.join(root, 'other.txt'), 'someone else is working here\n');
+    writeFileSync(path.join(root, 'draft.txt'), 'untracked\n');
+
+    await squashIntoTarget(root, 'card/4', 'main', 'Card four');
+    assert.equal(git('log', '-1', '--format=%s'), 'Card four');
+    assert.equal(git('show', '--name-only', '--format=', 'HEAD'), 'card-4.txt');
+    assert.equal(git('status', '--porcelain'), 'M other.txt\n?? draft.txt');
+    git('checkout', '--', 'other.txt');
+    rmSync(path.join(root, 'draft.txt'));
   });
 
   it('commits two cards moved at the same time one after the other', async () => {

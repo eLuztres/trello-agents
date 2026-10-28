@@ -41,9 +41,16 @@ async function squash(repoPath: string, branch: string, targetBranch: string, me
   if (currentBranch !== targetBranch) {
     throw new ShipBlockedError(`The main checkout (\`${repoPath}\`) is on \`${currentBranch || 'a detached HEAD'}\`, not \`${targetBranch}\`. Switch it to \`${targetBranch}\` and move the card again.`);
   }
-  const changes = (await git(repoPath, ['status', '--porcelain', '--untracked-files=no'])).trim();
-  if (changes) {
-    throw new ShipBlockedError(`The main checkout (\`${repoPath}\`) has uncommitted changes. Commit or put them aside, then move the card again:\n\`\`\`\n${changes}\n\`\`\``);
+  // Other unfinished work may stay in the checkout; only the card's own files must be untouched, and nothing staged.
+  if ((await git(repoPath, ['diff', '--cached', '--name-only'])).trim()) {
+    throw new ShipBlockedError(`The main checkout (\`${repoPath}\`) has staged changes. Commit or unstage them, then move the card again.`);
+  }
+  const fileList = async (args: string[]) => (await git(repoPath, [...args, '-z'])).split('\0').filter(Boolean);
+  const cardFiles = await fileList(['diff', '--name-only', `${targetBranch}...${branch}`]);
+  const localFiles = new Set([...(await fileList(['diff', '--name-only'])), ...(await fileList(['ls-files', '--others', '--exclude-standard']))]);
+  const filesInTheWay = cardFiles.filter((file) => localFiles.has(file));
+  if (filesInTheWay.length) {
+    throw new ShipBlockedError(`The main checkout (\`${repoPath}\`) has uncommitted changes in files this card changes. Commit or put them aside, then move the card again:\n\`\`\`\n${filesInTheWay.join('\n')}\n\`\`\``);
   }
 
   try {
@@ -67,9 +74,9 @@ async function squash(repoPath: string, branch: string, targetBranch: string, me
   return (await git(repoPath, ['rev-parse', '--short', 'HEAD'])).trim();
 }
 
-// Safe because squashIntoTarget only starts on a checkout without uncommitted changes.
+// --merge undoes only the squash: the checkout's other uncommitted work stays as it was.
 async function undoSquash(repoPath: string): Promise<void> {
-  await git(repoPath, ['reset', '--hard', 'HEAD']);
+  await git(repoPath, ['reset', '--merge', 'HEAD']);
 }
 
 /** Pushes the branch to origin and returns the full hash that was pushed. */
