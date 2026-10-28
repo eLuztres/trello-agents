@@ -145,8 +145,10 @@ function removeQueuedJobs(cardId: string): void {
 }
 
 function startQueuedJobs(): void {
-  while (running.size < CONFIG.maxParallelJobs) {
-    const index = queue.findIndex((job) => !running.has(job.cardId));
+  while (true) {
+    // Commits and pushes are quick plain git, so they don't wait for a free agent slot.
+    const hasFreeSlot = running.size < CONFIG.maxParallelJobs;
+    const index = queue.findIndex((job) => !running.has(job.cardId) && (hasFreeSlot || (job.stage !== undefined && isGitStage(job.stage))));
     if (index === -1) return;
     const [job] = queue.splice(index, 1);
     const controller = new AbortController();
@@ -355,11 +357,15 @@ async function resumeAfterRestart(): Promise<void> {
     if (card && isCutOff && stageByListId[card.idList] === stage) enqueue({ cardId, stage });
     else if (card && awaitsReview && card.idList === reviewListId) enqueue({ cardId, stage: 'review' });
   }
-  // Cards waiting in To Do or Planning were only queued in memory: those lists mean "build it" and "plan it".
-  for (const stage of ['build', 'plan'] as const) {
+  // Cards waiting in To Do, Planning, Committed or Pushed were only queued in memory: those lists are orders.
+  // A commit is never made twice (commitCard checks the hash), and pushing again changes nothing.
+  for (const stage of ['commit', 'push', 'build', 'plan'] as const) {
     const listId = firstListId(stage);
     const cards = listId ? await trello.getListCards(listId) : [];
-    for (const { id } of cards) if (!isBusy(id)) enqueue({ cardId: id, stage });
+    for (const { id } of cards) {
+      const isFinished = state.cards[id]?.lastStage === stage && state.cards[id]?.lastStatus === 'done';
+      if (!isBusy(id) && !isFinished) enqueue({ cardId: id, stage });
+    }
   }
   startQueuedJobs();
 }
