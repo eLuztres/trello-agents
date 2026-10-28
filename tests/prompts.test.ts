@@ -7,7 +7,7 @@ import type { TrelloCard } from '../src/trello.ts';
 const CARD: TrelloCard = { id: 'c1', idShort: 7, idList: 'l1', name: 'Cart total', desc: '', shortUrl: 'https://trello.com/c/x', labels: [] };
 const CARD_STATE: CardState = { idShort: 7, name: 'Cart total', repo: 'webStore', branch: 'card/7-cart-total', worktree: '/tmp/wt' };
 
-const promptOf = (stage: 'plan' | 'build' | 'review') => planStageRun(stage, CARD, CARD_STATE, 'main').prompt;
+const promptOf = (stage: 'plan' | 'build' | 'review') => planStageRun(stage, CARD, CARD_STATE, 'main', []).prompt;
 
 describe('stage prompts', () => {
   it('asks the plan for a verdict that picks Ready or Backlog', () => {

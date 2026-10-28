@@ -5,7 +5,7 @@ const WORKSPACE = path.resolve(import.meta.dirname, '..');
 
 export interface Config {
   boardId: string;
-  /** Trello list names for each automated stage (the first is where cards are moved to); a stage without lists is skipped. Other lists (like Done) stop the agent. */
+  /** Trello list names for each automated stage (the first is where cards are moved to); a stage without lists is skipped. Other lists (like Done) stop the agent, and comments there get a chat reply. */
   lists: Partial<Record<Stage, string[]>>;
   /** A plan without open questions moves the card here (no agent); you move it on to build it. */
   plannedList: string;
@@ -40,6 +40,7 @@ export const CONFIG: Config = {
     custom: path.join(WORKSPACE, 'custom'),
     'shop-emlets': path.join(WORKSPACE, 'shop-emlets'),
     'shop-baifo': path.join(WORKSPACE, 'shop-baifo'),
+    'trello-agents': path.join(WORKSPACE, 'trello-agents'),
   },
   defaultRepo: 'shop-baifo',
   manualLabels: ['manual'],
@@ -49,5 +50,5 @@ export const CONFIG: Config = {
   worktreeRoot: path.join(WORKSPACE, '.worktrees'),
   maxParallelJobs: 2,
   pollIntervalSeconds: 30,
-  maxBudgetUsd: { plan: 2, build: 10, review: 5 },
+  maxBudgetUsd: { plan: 2, build: 10, review: 5, chat: 0.5 },
 };

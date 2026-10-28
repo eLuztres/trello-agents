@@ -1,6 +1,7 @@
 import type { TrelloAction } from './trello.ts';
 
-export type AgentStage = 'plan' | 'build' | 'review';
+/** `chat` answers comments on cards outside the automated lists. */
+export type AgentStage = 'plan' | 'build' | 'review' | 'chat';
 /** Plain git, no agent: your own move into their list is your OK to commit or push. */
 export type GitStage = 'commit' | 'push';
 export type Stage = AgentStage | GitStage;

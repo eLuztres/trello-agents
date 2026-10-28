@@ -1,6 +1,6 @@
 # trello-agents
 
-Runs a Claude Code agent for each list on the Trello board. You are the chef: a card in To Do or Doing gets built right away, then reviewed. You give the OK to commit and to push by moving the card yourself. Cards you want planned first go to Planning.
+Runs a Claude Code agent for each list on the Trello board. You are the chef: a card in To Do or Doing gets built right away, then reviewed. You give the OK to commit and to push by moving the card yourself. Cards you want planned first go to Planning. Every comment you write gets a reply, in any list, so you can run the team from Trello.
 
 | List | Agent | Permission mode | Output |
 | :--- | :--- | :--- | :--- |
@@ -14,13 +14,24 @@ Runs a Claude Code agent for each list on the Trello board. You are the chef: a 
 | **Committed** | none, plain git (your move = OK to commit) | | Squashes the card branch into the target branch with the message from the description, comments the hash. Blocked (conflict, uncommitted changes in the main checkout): comments why and moves the card back |
 | **Pushed** | none, plain git (your move = OK to push) | | Pushes the target branch, waits for Vercel and comments the live URL or the failure, then removes the card's worktree and branch |
 | **Done** | none, you move it by hand | | |
+| **Backlog, Done, any other list** | Chat, only when you comment | `plan` (read-only), $0.50 | A reply comment; moves the card to To Do only if you ask ("do it", "build it") |
 
-- **Comment on a card** to talk to its agent. It re-runs the card's current stage with your comment (for example, "use the existing coupon validator").
+## Talking to an agent
+
+Comment on any card. Within one poll (30 s) you get "🤖 Got it, looking at it…", then a real answer:
+
+- **To Do, Doing, Testing:** the card's stage re-runs with your comment (for example, "use the existing coupon validator"). Its report starts by answering your comment. If an agent is already running on the card, your comment waits for it.
+- **Backlog, Done and other lists:** a chat agent reads the card, its comments and the code, and answers or says what it would do and why. It ends with a next step ("Move to To Do and I build it", "Need from you: …"). It changes no code, makes no commits and leaves the card where it is, unless your comment says "do it" or "build it": then it moves the card to To Do and the build starts. It also answers on `manual` cards.
+
+Every agent replies the same way: what was done or found, the result (with a screenshot or video link for UI work) and what's next. Logs stay in `logs/card-<n>.log`.
+
+## How it works
+
 - **Move a card** to stop its running agent and start the new list's agent.
 - **Every UI change comes with a video.** Build and review record the changed pages on desktop and at 375px into `logs/videos/`. The daemon attaches them to the card and starts the report with "🎬 Video: <link>". Without a UI change the report starts with "🎬 Video: no UI change".
 - Only moves made by you into **Committed** and **Pushed** commit or push. Claude sessions use your Trello account too, so AGENTS.md tells them never to move a card there.
 - Every card gets its own git worktree in `../.worktrees/`, so cards run in parallel without touching your checkout. `node_modules` and `.env` are linked from the main repo.
-- A card labeled with a repo name (`custom`, `webStore`, …) works in that repo. Any other card works in `shop-baifo` (`defaultRepo` in `config.ts`). Cards labeled `manual` never start an agent.
+- A card labeled with a repo name (`custom`, `webStore`, `trello-agents`, …) works in that repo. Any other card works in `shop-baifo` (`defaultRepo` in `config.ts`). Cards labeled `manual` never start a build or review agent.
 - Claude sessions use the same Trello account as you, so they start their comments with 🤖, like the agents. Only comments without it steer an agent.
 - Only cards, moves and comments made by **you** start agents, because card text becomes instructions for an agent in auto mode. Keep the board private.
 
@@ -61,4 +72,4 @@ git -C ../webStore worktree remove ../.worktrees/webStore-card-12
 
 ## Config
 
-Everything is in `config.ts`: list names, repos, the target branch per repo (`targetBranches`, otherwise `main`), parallel job limit (2), poll interval (30 s) and the dollar budget per stage.
+Everything is in `config.ts`: list names, repos, the target branch per repo (`targetBranches`, otherwise `main`), parallel job limit (2), poll interval (30 s) and the dollar budget per stage (chat: $0.50).
