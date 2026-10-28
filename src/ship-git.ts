@@ -23,8 +23,17 @@ export function withCoAuthor(message: string): string {
 export const isCommitOnBranch = (repoPath: string, hash: string, branch: string) =>
   isGitOk(repoPath, ['merge-base', '--is-ancestor', hash, branch]);
 
+// One squash at a time: two cards committed together would share the main checkout's index.
+let squashQueue: Promise<unknown> = Promise.resolve();
+
 /** Brings the card branch into the target branch as one commit, in the repo's main checkout. Returns the short hash. */
-export async function squashIntoTarget(repoPath: string, branch: string, targetBranch: string, message: string): Promise<string> {
+export function squashIntoTarget(repoPath: string, branch: string, targetBranch: string, message: string): Promise<string> {
+  const result = squashQueue.then(() => squash(repoPath, branch, targetBranch, message));
+  squashQueue = result.catch(() => undefined);
+  return result;
+}
+
+async function squash(repoPath: string, branch: string, targetBranch: string, message: string): Promise<string> {
   if (!(await isGitOk(repoPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]))) {
     throw new ShipBlockedError(`The card branch \`${branch}\` doesn't exist, so there is nothing to commit.`);
   }

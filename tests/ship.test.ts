@@ -101,4 +101,15 @@ describe('squashIntoTarget', () => {
   it('refuses when there is nothing left to commit', async () => {
     await assert.rejects(squashIntoTarget(root, 'card/1', 'main', 'again'), /Nothing to commit/);
   });
+
+  it('commits two cards moved at the same time one after the other', async () => {
+    for (const card of ['card/2', 'card/3']) {
+      git('checkout', '-qb', card, 'main');
+      commitFile(`${card.replace('/', '-')}.txt`, 'new\n');
+    }
+    git('checkout', '-q', 'main');
+    const hashes = await Promise.all([squashIntoTarget(root, 'card/2', 'main', 'Card two'), squashIntoTarget(root, 'card/3', 'main', 'Card three')]);
+    assert.notEqual(hashes[0], hashes[1]);
+    assert.equal(git('log', '-2', '--format=%s'), 'Card three\nCard two');
+  });
 });
