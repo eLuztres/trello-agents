@@ -5,7 +5,7 @@ import { CONFIG } from '../config.ts';
 import { pickRepo, toBranchName } from './card.ts';
 import { runClaude } from './claude.ts';
 import { readVerdict } from './description.ts';
-import { BOT_PREFIX, isGitStage, toCardEvent, type AgentStage, type CardEvent, type GitStage, type Stage } from './events.ts';
+import { BOT_PREFIX, isGitStage, replanStage, toCardEvent, type AgentStage, type CardEvent, type GitStage, type Stage } from './events.ts';
 import { notifyDesktop } from './notify.ts';
 import { attachVideos, commitCard, handOverReview, pushCard } from './ship.ts';
 import { STAGE_TITLES, SYSTEM_PROMPT, VIDEO_DIR, planStageRun } from './stages.ts';
@@ -120,7 +120,8 @@ function ensureCardState(card: TrelloCard): CardState {
 
 async function runJob(job: Job, signal: AbortSignal): Promise<void> {
   const card = await trello.getCard(job.cardId);
-  const stage = job.stage ?? stageByListId[card.idList] ?? replanStage(card, job);
+  const previous = state.cards[card.id];
+  const stage = job.stage ?? stageByListId[card.idList] ?? replanStage(previous?.lastStage, previous?.lastStatus, card.idList, [backlogListId, plannedListId]);
   if (!stage) return;
 
   if (card.labels.some((label) => CONFIG.manualLabels.includes(label.name.toLowerCase()))) {
@@ -196,13 +197,6 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
     notifyDesktop(`${title} failed`, card.name);
     throw error;
   }
-}
-
-/** Your comment on a planned card in Backlog (answers) or Ready (changes) plans it again. */
-function replanStage(card: TrelloCard, job: Job): Stage | undefined {
-  const wasPlanned = state.cards[card.id]?.lastStage === 'plan';
-  const isAfterPlan = card.idList === backlogListId || card.idList === plannedListId;
-  return job.feedback && wasPlanned && isAfterPlan ? 'plan' : undefined;
 }
 
 /** Ready rests until you move it on; Backlog waits for your answer. */

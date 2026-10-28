@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { pickRepo, toBranchName } from '../src/card.ts';
-import { BOT_PREFIX, toCardEvent, type Stage } from '../src/events.ts';
+import { BOT_PREFIX, replanStage, toCardEvent, type Stage } from '../src/events.ts';
 import type { TrelloAction } from '../src/trello.ts';
 
 const ME = 'me';
@@ -63,5 +63,24 @@ describe('pickRepo', () => {
 
   it('falls back to the default repo', () => {
     assert.equal(pickRepo(['bug'], repos, 'webStore'), 'webStore');
+  });
+});
+
+describe('replanStage', () => {
+  const AFTER_PLAN = ['backlog', 'ready'];
+
+  it('plans again on a comment in Backlog or Ready after a finished plan', () => {
+    assert.equal(replanStage('plan', 'done', 'backlog', AFTER_PLAN), 'plan');
+    assert.equal(replanStage('plan', 'done', 'ready', AFTER_PLAN), 'plan');
+  });
+
+  it('ignores comments on cards that were never planned or are elsewhere', () => {
+    assert.equal(replanStage(undefined, undefined, 'backlog', AFTER_PLAN), undefined);
+    assert.equal(replanStage('build', 'done', 'backlog', AFTER_PLAN), undefined);
+    assert.equal(replanStage('plan', 'done', 'done', AFTER_PLAN), undefined);
+  });
+
+  it('ignores comments after a plan you stopped by moving the card away', () => {
+    assert.equal(replanStage('plan', 'stopped', 'backlog', AFTER_PLAN), undefined);
   });
 });

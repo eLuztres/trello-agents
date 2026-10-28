@@ -14,7 +14,7 @@ import { waitForDeployment, type DeployResult } from './vercel.ts';
 const targetBranchOf = (cardState: CardState) => CONFIG.targetBranches[cardState.repo] ?? CONFIG.baseBranch;
 
 /** After a "ready" review: writes What changed, the videos and the commit message into the description. */
-export async function handOverReview(card: TrelloCard, report: string, videoLinks: string[], readyListId: string): Promise<void> {
+export async function handOverReview(card: TrelloCard, report: string, videoLinks: string[], uncommittedListId: string): Promise<void> {
   const handOver = readHandOver(report);
   if (!handOver) {
     await trello.addComment(card.id, `${BOT_PREFIX} The review is ready, but its report has no "What changed" or "Commit message" section. Write the commit message under \`## Commit message\` in the description before moving the card to Committed.`);
@@ -22,7 +22,7 @@ export async function handOverReview(card: TrelloCard, report: string, videoLink
   // Fresh copy: you may have edited the description while the review ran.
   const { desc } = await trello.getCard(card.id);
   if (handOver) await trello.setDescription(card.id, withHandOver(desc, { ...handOver, videoLinks }));
-  await trello.moveCard(card.id, readyListId);
+  await trello.moveCard(card.id, uncommittedListId);
 }
 
 /** Uploads the videos a build or review recorded and returns Markdown links to them. */
@@ -45,7 +45,7 @@ export async function attachVideos(card: TrelloCard): Promise<string[]> {
 }
 
 /** Your move to Committed: squashes the card branch into the target branch with the message from the description. */
-export async function commitCard(card: TrelloCard, cardState: CardState, readyListId: string): Promise<boolean> {
+export async function commitCard(card: TrelloCard, cardState: CardState, uncommittedListId: string): Promise<boolean> {
   const repoPath = CONFIG.repos[cardState.repo];
   const targetBranch = targetBranchOf(cardState);
 
@@ -59,7 +59,7 @@ export async function commitCard(card: TrelloCard, cardState: CardState, readyLi
     if (!message) throw new ShipBlockedError('The description has no commit message. Write it under `## Commit message` and move the card again.');
     cardState.commitHash = await squashIntoTarget(repoPath, cardState.branch, targetBranch, message);
   } catch (error) {
-    await reportBlocked(card, 'Nothing committed', error, readyListId);
+    await reportBlocked(card, 'Nothing committed', error, uncommittedListId);
     return false;
   }
 
@@ -69,12 +69,12 @@ export async function commitCard(card: TrelloCard, cardState: CardState, readyLi
 }
 
 /** Your move to Pushed: pushes the target branch, waits for Vercel and cleans up the card's worktree. */
-export async function pushCard(card: TrelloCard, cardState: CardState, readyListId: string, committedListId: string, signal: AbortSignal): Promise<boolean> {
+export async function pushCard(card: TrelloCard, cardState: CardState, uncommittedListId: string, committedListId: string, signal: AbortSignal): Promise<boolean> {
   const repoPath = CONFIG.repos[cardState.repo];
   const targetBranch = targetBranchOf(cardState);
 
   if (!cardState.commitHash || !(await isCommitOnBranch(repoPath, cardState.commitHash, targetBranch))) {
-    await reportBlocked(card, 'Nothing pushed', new ShipBlockedError(`This card has no commit on \`${targetBranch}\` yet. Move it to **Committed** first.`), readyListId);
+    await reportBlocked(card, 'Nothing pushed', new ShipBlockedError(`This card has no commit on \`${targetBranch}\` yet. Move it to **Committed** first.`), uncommittedListId);
     return false;
   }
 

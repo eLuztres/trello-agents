@@ -33,6 +33,11 @@ export function toCardEvent(action: TrelloAction, stageByListId: Record<string, 
   }
 }
 
+/** Your comment on a finished plan in Backlog (answers) or Ready (changes) plans the card again. */
+export function replanStage(lastStage: string | undefined, lastStatus: string | undefined, listId: string, afterPlanListIds: string[]): 'plan' | undefined {
+  return lastStage === 'plan' && lastStatus === 'done' && afterPlanListIds.includes(listId) ? 'plan' : undefined;
+}
+
 function movedTo(cardId: string, listId: string | undefined, stageByListId: Record<string, Stage>): CardEvent | null {
   return listId ? { kind: 'moved', cardId, stage: stageByListId[listId] ?? null } : null;
 }
