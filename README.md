@@ -4,17 +4,24 @@ Runs a Claude Code agent for each list on the Trello board. You are the chef: a 
 
 | List | Agent | Permission mode | Output |
 | :--- | :--- | :--- | :--- |
-| **Backlog** | none | | Plans with open questions come back here. Your answer as a comment plans the card again |
-| **Planning** | Planner | `plan` (read-only) | Posts the plan. No open questions: moves the card to Ready. Questions: posts them and moves the card back to Backlog |
-| **Ready** | none, a resting list | | Planned, nothing left to ask. You move it to To Do. A comment here changes the plan |
-| **To Do** | Developer | `auto` | Commits on `card/<n>-<slug>`, then moves the card to Testing |
-| **Doing** | Developer, same as To Do | `auto` | |
-| **Testing** | Reviewer (fresh session) | `auto` | Fixes, missing tests, lint + tests, `docs/changes/card-<n>.md`, report comment. Verdict "ready" moves the card to Uncommitted |
-| **Uncommitted** | none, waits for you | | The description gets **What changed**, the **Video** links and a proposed **Commit message** you can edit |
-| **Committed** | none, plain git (your move = OK to commit) | | Squashes the card branch into the target branch with the message from the description, comments the hash. Blocked (conflict, uncommitted changes in the main checkout): comments why and moves the card back |
-| **Pushed** | none, plain git (your move = OK to push) | | Pushes the target branch, waits for Vercel and comments the live URL or the failure, then removes the card's worktree and branch |
-| **Done** | none, you move it by hand | | |
+| **✋ Backlog** | none | | Plans with open questions come back here. Your answer as a comment plans the card again |
+| **✋ Planning** | Planner | `plan` (read-only) | Posts the plan. No open questions: moves the card to Ready. Questions: posts them and moves the card back to Backlog |
+| **🤖 Ready** | none, a resting list | | Planned, nothing left to ask. You move it to To Do. A comment here changes the plan |
+| **✋ To Do** | Developer | `auto` | Your drop starts the build: the card moves to Doing while it runs |
+| **🤖 Doing** | Developer | `auto` | Commits on `card/<n>-<slug>`, then moves the card to Testing |
+| **🤖 Testing** | Reviewer (fresh session) | `auto` | Fixes, missing tests, lint + tests, `docs/changes/card-<n>.md`, report comment. Verdict "ready" moves the card to Uncommitted |
+| **🤖 Uncommitted** | none, waits for you | | The description gets **What changed**, the **Video** links and a proposed **Commit message** you can edit |
+| **✋ Committed** | none, plain git (your move = OK to commit) | | Squashes the card branch into the target branch with the message from the description, comments the hash. Blocked (conflict, uncommitted changes in the main checkout): comments why and moves the card back |
+| **✋ Pushed** | none, plain git (your move = OK to push) | | Pushes the target branch, waits for Vercel and comments the live URL or the failure, then removes the card's worktree and branch |
+| **✋ Done** | none, you move it by hand | | |
 | **Backlog, Done, any other list** | Chat, only when you comment | `plan` (read-only), $0.50 | A reply comment; moves the card to To Do only if you ask ("do it", "build it") |
+
+## Who moves what
+
+- **✋ lists are yours:** drop a card there to give an order (plan, build, commit, push) or to park it.
+- **🤖 lists are the agents':** only the daemon puts cards there. If you drop one in by hand, it goes back with a note.
+- **🔒 A card with the purple "🤖 AI working" label is locked:** an agent works on it or is about to. Moving it by hand puts it back. Comment `stop` to stop the agent; the card then waits in Backlog.
+- Every card's name starts with its number ("#123 …"). `npm run number-cards` adds missing ones.
 
 ## Talking to an agent
 

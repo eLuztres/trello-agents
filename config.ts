@@ -13,6 +13,12 @@ export interface Config {
   backlogList: string;
   /** A review with verdict "ready" moves the card here, to wait for your OK. */
   uncommittedList: string;
+  /** Builds run here: the daemon moves the card in from To Do when the build starts. */
+  buildingList: string;
+  /** Only the daemon puts cards here; your own drop into one is undone. */
+  aiLists: string[];
+  /** The colored label a card wears while an agent works on it. */
+  workingLabel: { name: string; color: string };
   /** A card label with one of these names picks the repo, otherwise defaultRepo is used. */
   repos: Record<string, string>;
   defaultRepo: string;
@@ -29,12 +35,15 @@ export interface Config {
 
 export const CONFIG: Config = {
   boardId: 'd5Qaotvz',
-  // Planning ends in Ready (or Backlog with questions). To Do and Doing both build; the builder moves the card to Testing.
-  // Uncommitted → Committed → Pushed: only your own moves commit and push, no agent runs there.
-  lists: { plan: ['Planning'], build: ['To Do', 'Doing'], review: ['Testing'], commit: ['Committed'], push: ['Pushed'] },
-  plannedList: 'Ready',
-  backlogList: 'Backlog',
-  uncommittedList: 'Uncommitted',
+  // ✋ lists are yours to drop cards in, 🤖 lists only the agents fill. Planning ends in Ready (or Backlog with questions).
+  // To Do starts a build, which runs in Doing and moves on to Testing. Committed and Pushed: your move is the OK.
+  lists: { plan: ['✋ Planning'], build: ['✋ To Do', '🤖 Doing'], review: ['🤖 Testing'], commit: ['✋ Committed'], push: ['✋ Pushed'] },
+  plannedList: '🤖 Ready',
+  backlogList: '✋ Backlog',
+  uncommittedList: '🤖 Uncommitted',
+  buildingList: '🤖 Doing',
+  aiLists: ['🤖 Ready', '🤖 Doing', '🤖 Testing', '🤖 Uncommitted'],
+  workingLabel: { name: '🤖 AI working', color: 'purple' },
   repos: {
     webStore: path.join(WORKSPACE, 'webStore'),
     custom: path.join(WORKSPACE, 'custom'),

@@ -11,12 +11,14 @@ import { notifyDesktop } from './notify.ts';
 import { attachVideos, commitCard, handOverReview, pushCard } from './ship.ts';
 import { STAGE_TITLES, SYSTEM_PROMPT, VIDEO_DIR, planStageRun, takeBuildRequest } from './stages.ts';
 import { loadState, saveState, type CardState } from './state.ts';
-import { trello, type TrelloCard, type TrelloList } from './trello.ts';
+import { isOwnMove, trello, type TrelloCard, type TrelloList } from './trello.ts';
 import { commitLeftovers, ensureWorktree } from './worktree.ts';
 
 const LOG_DIR = path.resolve(import.meta.dirname, '..', 'logs');
 const MAX_COMMENT_LENGTH = 15_000; // Trello's limit is 16384
 const RECEIPT = `${BOT_PREFIX} Got it, looking at it…`;
+// Your comment `stop` on a card stops its agent.
+const STOP_COMMAND = /^stop$/i;
 
 interface Job {
   cardId: string;
@@ -32,6 +34,9 @@ let stageByListId: Record<string, Stage>;
 let uncommittedListId: string;
 let plannedListId: string;
 let backlogListId: string;
+let buildingListId: string;
+let aiListIds: Set<string>;
+let workingLabelId: string;
 
 function findList(lists: TrelloList[], listName: string): TrelloList {
   const list = lists.find((candidate) => candidate.name === listName);
@@ -64,14 +69,49 @@ async function poll(myMemberId: string): Promise<void> {
   const sinceActionId = state.lastActionId;
   for (const action of actions) {
     if (action.id === sinceActionId) continue;
+    state.lastActionId = action.id;
     if (action.type === 'createCard' && action.data.card) numberCard(action.data.card.id).catch((error: Error) => console.error(`Numbering failed: ${error.message}`));
+    const { card, listAfter, listBefore } = action.data;
+    if (card && listAfter && isOwnMove(card.id, listAfter.id)) continue;
     const event = toCardEvent(action, stageByListId, myMemberId);
+    if (event?.kind === 'moved' && listAfter && listBefore && (await undoWrongMove(event.cardId, listAfter.id, listBefore.id))) continue;
+    if (event?.kind === 'commented' && STOP_COMMAND.test(event.text.trim())) {
+      await stopCard(event.cardId);
+      continue;
+    }
     if (event?.kind === 'commented') await sendReceipt(event.cardId);
     if (event) schedule(event);
-    state.lastActionId = action.id;
   }
   saveState(state);
   startQueuedJobs();
+}
+
+const isBusy = (cardId: string) => running.has(cardId) || queue.some((job) => job.cardId === cardId && job.stage);
+
+/** Puts a card back when your move would break the flow: it's in an agent's hands, or it went into a 🤖 list. */
+async function undoWrongMove(cardId: string, toListId: string, fromListId: string): Promise<boolean> {
+  const isLocked = isBusy(cardId);
+  if (!isLocked && !aiListIds.has(toListId)) return false;
+  await trello.moveCard(cardId, fromListId);
+  const note = isLocked
+    ? `🔒 An agent is working on this card, so I put it back. Comment \`stop\` to stop it.`
+    : `Only the agents put cards in that list, so I put it back. To build it, move it to **${CONFIG.lists.build?.[0]}**.`;
+  await trello.addComment(cardId, `${BOT_PREFIX} ${note}`);
+  return true;
+}
+
+/** Your `stop` comment: the agent stops and the card waits in Backlog. */
+async function stopCard(cardId: string): Promise<void> {
+  running.get(cardId)?.abort();
+  removeQueuedJobs(cardId);
+  await trello.moveCard(cardId, backlogListId);
+  await trello.addComment(cardId, `${BOT_PREFIX} Stopped. The card waits in **${CONFIG.backlogList}**; move it to **${CONFIG.lists.build?.[0]}** to start again.`);
+}
+
+/** The colored label shows on the board which cards an agent has in hand. */
+function markWorking(cardId: string, isWorking: boolean): void {
+  const change = isWorking ? trello.addLabel(cardId, workingLabelId) : trello.removeLabel(cardId, workingLabelId);
+  change.catch((error: Error) => console.error(`Card ${cardId}: working label failed: ${error.message}`));
 }
 
 /** Tells you right away that a comment was heard, even if the card waits for a running job. */
@@ -104,11 +144,13 @@ function startQueuedJobs(): void {
     const [job] = queue.splice(index, 1);
     const controller = new AbortController();
     running.set(job.cardId, controller);
+    markWorking(job.cardId, true);
 
     runJob(job, controller.signal)
       .catch((error: Error) => console.error(`Card ${job.cardId}: ${error.message}`))
       .finally(() => {
         running.delete(job.cardId);
+        if (!isBusy(job.cardId)) markWorking(job.cardId, false);
         startQueuedJobs();
       });
   }
@@ -169,6 +211,7 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
 
   try {
     await ensureWorktree(CONFIG.repos[cardState.repo], cardState.worktree, cardState.branch, CONFIG.baseBranch);
+    if (stage === 'build' && card.idList !== buildingListId) await trello.moveCard(card.id, buildingListId);
     await trello.addComment(card.id, `${BOT_PREFIX} **${STAGE_TITLES[stage]}** started. Follow along: \`tail -f ${logFile}\``);
 
     const result = await runClaude(
@@ -205,7 +248,10 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
     console.log(`${title}: ${status}`);
 
     const reviewListId = firstListId('review');
-    if (result.isSuccess && stage === 'build' && reviewListId) await trello.moveCard(card.id, reviewListId);
+    if (result.isSuccess && stage === 'build' && reviewListId) {
+      await trello.moveCard(card.id, reviewListId);
+      queue.push({ cardId: card.id, stage: 'review' });
+    }
     if (result.isSuccess && stage === 'plan') await moveAfterPlan(card, isReady);
     if (isReady && stage === 'review') await handOverReview(card, result.text, videoLinks, uncommittedListId);
   } catch (error) {
@@ -268,8 +314,10 @@ async function runChat(card: TrelloCard, feedback: string, signal: AbortSignal):
     await trello.addComment(card.id, `${BOT_PREFIX} **Chat${status}** · $${result.costUsd.toFixed(2)}\n\n${text.slice(0, MAX_COMMENT_LENGTH)}${moveNote}`);
     console.log(`${title}: ${result.isSuccess ? 'done' : 'failed'}`);
 
-    // The move shows up as your own action in the next poll, which starts the build.
-    if (buildListId) await trello.moveCard(card.id, buildListId);
+    if (buildListId) {
+      await trello.moveCard(card.id, buildListId);
+      queue.push({ cardId: card.id, stage: 'build' });
+    }
   } catch (error) {
     if (signal.aborted) return console.log(`${title}: stopped because the card moved`);
     await trello.addComment(card.id, `${BOT_PREFIX} **Chat failed** before answering. See \`${logFile}\` and the daemon output.`);
@@ -287,6 +335,11 @@ function nextStepHint(stage: AgentStage, isSuccess: boolean, isReady: boolean): 
   return `Not ready: comment what to change, or move the card back to **${build}** with a comment.`;
 }
 
+async function findOrCreateLabel(name: string, color: string): Promise<string> {
+  const existing = (await trello.getLabels(CONFIG.boardId)).find((label) => label.name === name);
+  return existing?.id ?? (await trello.createLabel(CONFIG.boardId, name, color)).id;
+}
+
 async function main(): Promise<void> {
   mkdirSync(LOG_DIR, { recursive: true });
   mkdirSync(CONFIG.worktreeRoot, { recursive: true });
@@ -298,6 +351,9 @@ async function main(): Promise<void> {
   uncommittedListId = findList(lists, CONFIG.uncommittedList).id;
   plannedListId = findList(lists, CONFIG.plannedList).id;
   backlogListId = findList(lists, CONFIG.backlogList).id;
+  buildingListId = findList(lists, CONFIG.buildingList).id;
+  aiListIds = new Set(CONFIG.aiLists.map((listName) => findList(lists, listName).id));
+  workingLabelId = await findOrCreateLabel(CONFIG.workingLabel.name, CONFIG.workingLabel.color);
   console.log(`Watching board ${CONFIG.boardId} as @${me.username}. Only your own cards, moves and comments start agents.`);
 
   while (true) {

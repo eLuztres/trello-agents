@@ -14,6 +14,7 @@ export interface TrelloAction {
     card?: { id: string };
     list?: { id: string };
     listAfter?: { id: string };
+    listBefore?: { id: string };
     text?: string;
   };
 }
@@ -41,7 +42,7 @@ function authHeader(): string {
   return `OAuth oauth_consumer_key="${key}", oauth_token="${token}"`;
 }
 
-async function request<T>(method: 'GET' | 'POST' | 'PUT', path: string, params: Record<string, string> | FormData = {}): Promise<T> {
+async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, params: Record<string, string> | FormData = {}): Promise<T> {
   const url = new URL(API_URL + path);
   const isGet = method === 'GET';
   if (isGet && !(params instanceof FormData)) Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
@@ -77,6 +78,10 @@ function describeNetworkError(error: unknown): string {
   return cause ? `${message} (${cause.code ?? cause.message})` : message;
 }
 
+/** The daemon's own moves, so the next poll doesn't take them for yours (the board shows them as yours). */
+const ownMoves = new Set<string>();
+export const isOwnMove = (cardId: string, listId: string) => ownMoves.delete(`${cardId}:${listId}`);
+
 export const trello = {
   getMe: () => request<{ id: string; username: string }>('GET', '/members/me', { fields: 'id,username' }),
 
@@ -101,7 +106,16 @@ export const trello = {
 
   addComment: (cardId: string, text: string) => request('POST', `/cards/${cardId}/actions/comments`, { text }),
 
-  moveCard: (cardId: string, listId: string) => request('PUT', `/cards/${cardId}`, { idList: listId }),
+  moveCard: (cardId: string, listId: string) => {
+    ownMoves.add(`${cardId}:${listId}`);
+    return request('PUT', `/cards/${cardId}`, { idList: listId });
+  },
+
+  createLabel: (boardId: string, name: string, color: string) => request<{ id: string }>('POST', `/boards/${boardId}/labels`, { name, color }),
+
+  addLabel: (cardId: string, labelId: string) => request('POST', `/cards/${cardId}/idLabels`, { value: labelId }),
+
+  removeLabel: (cardId: string, labelId: string) => request('DELETE', `/cards/${cardId}/idLabels/${labelId}`),
 
   setDescription: (cardId: string, desc: string) => request('PUT', `/cards/${cardId}`, { desc }),
 
