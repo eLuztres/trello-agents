@@ -9,7 +9,7 @@ Runs a Claude Code agent for each list on the Trello board. You are the chef: a 
 | **🤖 Ready** | none, normally empty | | Plans now go straight on to the build. A card you drop here waits; a comment here changes the plan |
 | **✋ To Do** | Developer | `auto` | Your drop starts the build: the card moves to Doing while it runs |
 | **🤖 Doing** | Developer | `auto` | Commits on `card/<n>-<slug>`, then moves the card to Testing |
-| **🤖 Testing** | Reviewer (fresh session) | `auto` | Fixes, missing tests, lint + tests, `docs/changes/card-<n>.md`, report comment. Verdict "ready" moves the card to Uncommitted |
+| **🤖 Testing** | Reviewer (fresh session) | `auto` | First the daemon merges the target branch into the card branch, so the reviewer tests the code as it will land (a clash goes back to the builder, see below). Fixes, missing tests, lint + tests, `docs/changes/card-<n>.md`, report comment. Verdict "ready" moves the card to Uncommitted |
 | **🤖 Uncommitted** | none, passes straight through | | The description gets **What changed**, the **Video** links and a **Commit message**; then the card moves on to Committed by itself and ships. A merge conflict sends it back to To Do with the conflict as instructions (at most twice), then it ships again |
 | **✋ Committed** | none, plain git (your move = OK to commit, push and deploy) | | Squashes the card branch into the target branch with the message from the description, comments the hash, then pushes like Pushed and moves the card to Done. Blocked (conflict, uncommitted changes in the main checkout): comments why and moves the card back |
 | **✋ Pushed** | none, plain git (your move = OK to push) | | Only needed to retry a push.  Pushes the target branch, waits for Vercel and comments the live URL or the failure, then removes the card's worktree and branch |
@@ -43,6 +43,15 @@ Every agent replies the same way: what was done or found, the result (with a scr
 - A card labeled with a repo name (`custom`, `webStore`, `trello-agents`, …) works in that repo. Any other card works in `shop-baifo` (`defaultRepo` in `config.ts`). Cards labeled `manual` never start a build or review agent.
 - Claude sessions use the same Trello account as you, so they start their comments with 🤖, like the agents. Only comments without it steer an agent.
 - Only cards, moves and comments made by **you** start agents, because card text becomes instructions for an agent in auto mode. Keep the board private.
+
+## When main moves on
+
+Many cards run at once, so the target branch (`main`) moves on while a card is built. The daemon keeps the card branch up to date by itself:
+
+- **Before Testing** it merges the target branch into the card branch. If that works, the reviewer tests the up-to-date code.
+- **On a clash before Testing**, the card goes to **To Do** with one line: "🤖 `main` moved on; the agent is updating this card, then it is tested again and ships by itself." The builder (same session) merges the target branch and resolves the clash, then the card goes through Testing again with a new video.
+- **On a conflict at Committed**, the card goes back to a build that merges the target branch in, then it ships by itself.
+- Both share one limit: after two clashes the card is tested as it is, and Committed sends it back to Uncommitted for you.
 
 ## Setup
 

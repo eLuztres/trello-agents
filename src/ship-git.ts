@@ -76,6 +76,19 @@ async function squash(repoPath: string, branch: string, targetBranch: string, me
   return (await git(repoPath, ['rev-parse', '--short', 'HEAD'])).trim();
 }
 
+/** Merges the target branch into the card branch in its worktree. Returns the clashing files and leaves the branch untouched if there are any. */
+export async function mergeTargetIntoBranch(worktreePath: string, targetBranch: string): Promise<string[]> {
+  try {
+    await git(worktreePath, ['merge', '--no-edit', targetBranch]);
+    return [];
+  } catch (error) {
+    const conflicts = (await git(worktreePath, ['diff', '--name-only', '--diff-filter=U']).catch(() => '')).trim();
+    await git(worktreePath, ['merge', '--abort']).catch(() => undefined);
+    if (!conflicts) throw new Error(`Merging \`${targetBranch}\` failed:\n${gitOutput(error)}`);
+    return conflicts.split('\n');
+  }
+}
+
 // --merge undoes only the squash: the checkout's other uncommitted work stays as it was.
 async function undoSquash(repoPath: string): Promise<void> {
   await git(repoPath, ['reset', '--merge', 'HEAD']);

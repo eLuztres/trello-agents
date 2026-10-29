@@ -18,7 +18,7 @@ const execFileAsync = promisify(execFile);
 // Small enough for Trello's preview, with a palette so the colors stay true.
 const GIF_FILTER = "fps=10,scale='min(720,iw)':-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4";
 
-const targetBranchOf = (cardState: CardState) => CONFIG.targetBranches[cardState.repo] ?? CONFIG.baseBranch;
+export const targetBranchOf = (cardState: CardState) => CONFIG.targetBranches[cardState.repo] ?? CONFIG.baseBranch;
 
 /** After a "ready" review: writes What changed, the videos and the commit message into the description. */
 export async function handOverReview(card: TrelloCard, report: string, videoLinks: string[], uncommittedListId: string): Promise<void> {

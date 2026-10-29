@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, describe, it, mock } from 'node:test';
 import { readCommitMessage, readHandOver, readSection, readVerdict, withHandOver } from '../src/description.ts';
-import { ShipBlockedError, squashIntoTarget, withCoAuthor } from '../src/ship-git.ts';
+import { MergeConflictError, ShipBlockedError, mergeTargetIntoBranch, squashIntoTarget, withCoAuthor } from '../src/ship-git.ts';
 import { attachVideos, toGif, videoLink } from '../src/ship.ts';
 import { REVIEW_VIDEO_DIR, VIDEO_DIR } from '../src/stages.ts';
 import { trello, type TrelloCard } from '../src/trello.ts';
@@ -93,7 +93,7 @@ describe('squashIntoTarget', () => {
 
   it('refuses a conflict and leaves the checkout clean', async () => {
     commitFile('a.txt', 'main\n');
-    await assert.rejects(squashIntoTarget(root, 'card/1', 'main', 'msg'), /Conflicting files:\na\.txt/);
+    await assert.rejects(squashIntoTarget(root, 'card/1', 'main', 'msg'), (error) => error instanceof MergeConflictError && /Conflicting files:\na\.txt/.test(error.message));
     assert.equal(git('status', '--porcelain', '--untracked-files=no'), '');
     git('reset', '-q', '--hard', 'HEAD~1');
   });
@@ -134,6 +134,47 @@ describe('squashIntoTarget', () => {
     const hashes = await Promise.all([squashIntoTarget(root, 'card/2', 'main', 'Card two'), squashIntoTarget(root, 'card/3', 'main', 'Card three')]);
     assert.notEqual(hashes[0], hashes[1]);
     assert.equal(git('log', '-2', '--format=%s'), 'Card three\nCard two');
+  });
+});
+
+describe('mergeTargetIntoBranch', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'update-'));
+  const worktree = path.join(root, 'wt');
+  const repo = path.join(root, 'repo');
+  after(() => rmSync(root, { recursive: true, force: true }));
+  const gitIn = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  const commitFile = (cwd: string, name: string, text: string) => {
+    writeFileSync(path.join(cwd, name), text);
+    gitIn(cwd, 'add', name);
+    gitIn(cwd, 'commit', '-qm', `edit ${name}`);
+  };
+
+  execFileSync('git', ['init', '-qb', 'main', repo]);
+  gitIn(repo, 'config', 'user.email', 'test@example.com');
+  gitIn(repo, 'config', 'user.name', 'Test');
+  commitFile(repo, 'a.txt', 'one\n');
+  gitIn(repo, 'worktree', 'add', '-qb', 'card/1', worktree);
+  commitFile(worktree, 'a.txt', 'card\n');
+
+  it('brings a main that moved on into the card branch', async () => {
+    commitFile(repo, 'b.txt', 'from main\n');
+    assert.deepEqual(await mergeTargetIntoBranch(worktree, 'main'), []);
+    gitIn(worktree, 'merge-base', '--is-ancestor', 'main', 'HEAD');
+  });
+
+  it('returns the clashing files and leaves the branch as it was', async () => {
+    commitFile(repo, 'a.txt', 'main\n');
+    const before = gitIn(worktree, 'rev-parse', 'HEAD');
+    assert.deepEqual(await mergeTargetIntoBranch(worktree, 'main'), ['a.txt']);
+    assert.equal(gitIn(worktree, 'rev-parse', 'HEAD'), before);
+    assert.equal(gitIn(worktree, 'status', '--porcelain'), '');
+  });
+
+  it('throws when git refuses without a clash, so the reviewer never tests a half-updated branch', async () => {
+    commitFile(repo, 'c.txt', 'from main\n');
+    writeFileSync(path.join(worktree, 'c.txt'), 'untracked\n');
+    await assert.rejects(mergeTargetIntoBranch(worktree, 'main'), /Merging `main` failed/);
+    rmSync(path.join(worktree, 'c.txt'));
   });
 });
 

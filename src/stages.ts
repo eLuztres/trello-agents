@@ -130,6 +130,14 @@ function feedbackPrompt(stage: AgentStage, feedback: string): string {
   return `The chef commented on the card:\n${feedback}${answerFirst}`;
 }
 
+/** The build after a clash: main moved on, and the builder resolves it before anything else. */
+function updateBranchTask(targetBranch: string): string {
+  return [
+    `First: \`${targetBranch}\` moved on and this branch clashes with it. Update the branch onto ${targetBranch}: run \`git merge ${targetBranch}\`,`,
+    'resolve the conflicts keeping what both sides meant, and commit the merge. Then go on with the build below; the card goes through Testing again.',
+  ].join(' ');
+}
+
 /** Plan and build share a session; review starts fresh unless it's answering a comment; chat always starts fresh. */
 export function planStageRun(stage: AgentStage, card: TrelloCard, cardState: CardState, baseBranch: string, comments: string[], feedback?: string): StageRun {
   const sessionId = existingSessionId(stage, cardState, feedback);
@@ -139,6 +147,7 @@ export function planStageRun(stage: AgentStage, card: TrelloCard, cardState: Car
   const prompt = [
     shouldResume ? '' : cardBrief(card, cardState, baseBranch, comments),
     feedback ? feedbackPrompt(stage, feedback) : '',
+    stage === 'build' && cardState.updateOnto ? updateBranchTask(cardState.updateOnto) : '',
     stageTask(stage, card, baseBranch),
   ]
     .filter(Boolean)

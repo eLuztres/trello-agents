@@ -93,6 +93,14 @@ describe('planStageRun', () => {
     assert.doesNotMatch(run.prompt, /x{2001}/);
   });
 
+  it('asks the build after a clash to update the branch first, in the same session', () => {
+    const run = planStageRun('build', CARD, { ...CARD_STATE, updateOnto: 'main' }, 'main', []);
+    assert.equal(run.sessionId, 'dev-session');
+    assert.match(run.prompt, /`main` moved on[\s\S]*git merge main[\s\S]*Stage: BUILD/);
+    assert.doesNotMatch(planStageRun('build', CARD, CARD_STATE, 'main', []).prompt, /git merge/);
+    assert.doesNotMatch(planStageRun('review', CARD, { ...CARD_STATE, updateOnto: 'main' }, 'main', []).prompt, /git merge main/);
+  });
+
   it('leaves out the comments section when there are none', () => {
     const run = planStageRun('chat', CARD, CARD_STATE, 'main', [], 'hi');
     assert.doesNotMatch(run.prompt, /Comments so far/);

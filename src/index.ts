@@ -8,7 +8,8 @@ import { readVerdict } from './description.ts';
 import { BOT_PREFIX, isGitStage, replanStage, toCardEvent, type AgentStage, type CardEvent, type GitStage, type Stage } from './events.ts';
 import { numberCard } from './numbering.ts';
 import { notifyDesktop, openInBrowser } from './notify.ts';
-import { attachVideos, commitCard, handOverReview, pushCard } from './ship.ts';
+import { mergeTargetIntoBranch } from './ship-git.ts';
+import { MAX_CONFLICT_RETRIES, attachVideos, commitCard, handOverReview, pushCard, targetBranchOf } from './ship.ts';
 import { STAGE_TITLES, SYSTEM_PROMPT, VIDEO_DIR, isChangeRequest, planStageRun, takeBuildRequest } from './stages.ts';
 import { SHUTDOWN, loadState, saveState, statusAfterAbort, type CardState } from './state.ts';
 import { isOwnMove, trello, type TrelloCard, type TrelloList } from './trello.ts';
@@ -229,6 +230,8 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
     if (job.stage) await runGitStage(stage, card, cardState, signal);
     return;
   }
+  // The reviewer tests the code as it will land; a comment's reply skips this.
+  if (stage === 'review' && !job.feedback && !(await mergeTargetBeforeTesting(card, cardState))) return;
   const title = `#${card.idShort} ${STAGE_TITLES[stage]}`;
   const logFile = path.join(LOG_DIR, `card-${card.idShort}.log`);
   const run = planStageRun(stage, card, cardState, CONFIG.baseBranch, await getCommentTexts(card.id), job.feedback);
@@ -264,6 +267,7 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
     const isReady = stage !== 'build' && result.isSuccess && readVerdict(result.text) === 'ready';
     const videoLinks = stage === 'plan' ? [] : await attachVideos(card);
     cardState.lastStatus = status;
+    if (stage === 'build' && result.isSuccess) cardState.updateOnto = undefined;
     saveState(state);
 
     const report = result.text.slice(0, MAX_COMMENT_LENGTH);
@@ -336,6 +340,35 @@ async function runGitStage(stage: GitStage, card: TrelloCard, cardState: CardSta
   if (isDone) await trello.moveCard(card.id, doneListId);
   cardState.lastStatus = isDone ? 'done' : 'failed';
   saveState(state);
+}
+
+/** Merges the target branch into the card branch. A clash sends the card to the builder instead; returns whether testing can start. */
+async function mergeTargetBeforeTesting(card: TrelloCard, cardState: CardState): Promise<boolean> {
+  try {
+    await ensureWorktree(CONFIG.repos[cardState.repo], cardState.worktree, cardState.branch, CONFIG.baseBranch);
+    const conflicts = await mergeTargetIntoBranch(cardState.worktree, targetBranchOf(cardState));
+    if (!conflicts.length) return true;
+    // Retries used up: test the branch as it is; Committed then stops and hands it to you.
+    if ((cardState.conflictRetries ?? 0) >= MAX_CONFLICT_RETRIES) return true;
+  } catch (error) {
+    await trello.addComment(card.id, `${BOT_PREFIX} **${STAGE_TITLES.review} failed** before starting: the branch couldn't be updated. See the daemon output.`);
+    throw error;
+  }
+  await sendToUpdateBranch(card, cardState);
+  return false;
+}
+
+/** The card's branch clashes with the target branch: the builder updates it, then it goes through Testing again. */
+async function sendToUpdateBranch(card: TrelloCard, cardState: CardState): Promise<void> {
+  const targetBranch = targetBranchOf(cardState);
+  cardState.updateOnto = targetBranch;
+  cardState.conflictRetries = (cardState.conflictRetries ?? 0) + 1;
+  saveState(state);
+  const buildListId = firstListId('build');
+  if (!buildListId) return;
+  await trello.moveCard(card.id, buildListId);
+  await trello.addComment(card.id, `${BOT_PREFIX} \`${targetBranch}\` moved on; the agent is updating this card, then it is tested again and ships by itself.`);
+  enqueue({ cardId: card.id, stage: 'build' });
 }
 
 
@@ -415,7 +448,8 @@ async function resumeAfterRestart(): Promise<void> {
     const listId = firstListId(stage);
     const cards = listId ? await trello.getListCards(listId) : [];
     for (const { id } of cards) {
-      const isFinished = state.cards[id]?.lastStage === stage && state.cards[id]?.lastStatus === 'done';
+      // A card sent back after a clash still has its last build marked done, but it needs another one.
+      const isFinished = state.cards[id]?.lastStage === stage && state.cards[id]?.lastStatus === 'done' && !state.cards[id]?.updateOnto;
       if (!isBusy(id) && !isFinished) enqueue({ cardId: id, stage });
     }
   }
