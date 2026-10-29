@@ -4,6 +4,8 @@ const CO_AUTHOR = 'Co-Authored-By: Claude <noreply@anthropic.com>';
 
 /** Something in the way of a commit or push, said in plain words for the card comment. */
 export class ShipBlockedError extends Error {}
+/** The card branch clashes with the target branch: an agent can merge it in and try again. */
+export class MergeConflictError extends ShipBlockedError {}
 
 const gitOutput = (error: unknown) => {
   const { stdout = '', stderr = '' } = error as { stdout?: string; stderr?: string };
@@ -59,7 +61,7 @@ async function squash(repoPath: string, branch: string, targetBranch: string, me
     const conflicts = await git(repoPath, ['diff', '--name-only', '--diff-filter=U']).catch(() => '');
     await undoSquash(repoPath);
     const details = conflicts.trim() ? `Conflicting files:\n${conflicts.trim()}` : gitOutput(error);
-    throw new ShipBlockedError(`\`${branch}\` doesn't merge cleanly into \`${targetBranch}\`, so nothing was committed.\n\`\`\`\n${details}\n\`\`\``);
+    throw new MergeConflictError(`\`${branch}\` doesn't merge cleanly into \`${targetBranch}\`, so nothing was committed.\n\`\`\`\n${details}\n\`\`\``);
   }
 
   if (!(await git(repoPath, ['diff', '--cached', '--name-only'])).trim()) {

@@ -15,6 +15,8 @@ export interface CardState {
   reviewSessionId?: string;
   /** Set by the commit stage; the push stage needs it. */
   commitHash?: string;
+  /** How often a merge conflict sent the card back to a build, so it can't loop forever. */
+  conflictRetries?: number;
   lastStage?: string;
   lastStatus?: 'running' | 'done' | 'failed' | 'stopped';
 }

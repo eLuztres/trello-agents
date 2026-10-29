@@ -5,12 +5,12 @@ Runs a Claude Code agent for each list on the Trello board. You are the chef: a 
 | List | Agent | Permission mode | Output |
 | :--- | :--- | :--- | :--- |
 | **✋ Backlog** | none | | Plans with open questions come back here. Your answer as a comment plans the card again |
-| **✋ Planning** | Planner | `plan` (read-only) | Posts the plan. No open questions: moves the card to Ready. Questions: posts them and moves the card back to Backlog |
-| **🤖 Ready** | none, a resting list | | Planned, nothing left to ask. You move it to To Do. A comment here changes the plan |
+| **✋ Planning** | Planner | `plan` (read-only) | Posts the plan. No open questions: moves the card to To Do and builds it right away. Questions: posts them and moves the card back to Backlog |
+| **🤖 Ready** | none, normally empty | | Plans now go straight on to the build. A card you drop here waits; a comment here changes the plan |
 | **✋ To Do** | Developer | `auto` | Your drop starts the build: the card moves to Doing while it runs |
 | **🤖 Doing** | Developer | `auto` | Commits on `card/<n>-<slug>`, then moves the card to Testing |
 | **🤖 Testing** | Reviewer (fresh session) | `auto` | Fixes, missing tests, lint + tests, `docs/changes/card-<n>.md`, report comment. Verdict "ready" moves the card to Uncommitted |
-| **🤖 Uncommitted** | none, waits for you | | The description gets **What changed**, the **Video** links and a proposed **Commit message** you can edit |
+| **🤖 Uncommitted** | none, passes straight through | | The description gets **What changed**, the **Video** links and a **Commit message**; then the card moves on to Committed by itself and ships. A merge conflict sends it back to To Do with the conflict as instructions (at most twice), then it ships again |
 | **✋ Committed** | none, plain git (your move = OK to commit, push and deploy) | | Squashes the card branch into the target branch with the message from the description, comments the hash, then pushes like Pushed and moves the card to Done. Blocked (conflict, uncommitted changes in the main checkout): comments why and moves the card back |
 | **✋ Pushed** | none, plain git (your move = OK to push) | | Only needed to retry a push.  Pushes the target branch, waits for Vercel and comments the live URL or the failure, then removes the card's worktree and branch |
 | **✋ Done** | none, you move it by hand | | |
@@ -64,17 +64,9 @@ cd ../.worktrees/webStore-card-12 && claude --resume <session-id>   # jump into 
 
 Each report comment on the card also ends with the take-over command. You get a desktop notification when a stage finishes or fails.
 
-## Change videos
-
-```shell
-npm run videos   # http://localhost:4500, keep it open
-```
-
-Every change video in `~/Videos/changes/` (`card-<n>-<what>.mp4|webm|gif`), newest first and grouped by card. Click to play, **Delete** moves the file to the trash. A card links straight to its video with `http://localhost:4500/#card-<n>`.
-
 ## Finishing a card
 
-Check the card in **Uncommitted** (report, video, What changed), edit the commit message in the description if you like, then:
+A ready review ships by itself: Uncommitted → Committed (commit) → push → Vercel → Done. You only step in when a card stops with a comment. By hand, for a card that stopped:
 
 1. Move it to **Committed**. That's all: the card branch lands on the target branch as one commit (with a `Co-Authored-By: Claude` line), the daemon pushes, removes the card's worktree and branch, comments the Vercel result (it needs the Vercel CLI, logged in, and the repo linked with `vercel link`) and moves the card to **Done**.
 2. If the push fails, the card stays in Committed with the reason; move it to **Pushed** to try the push again.

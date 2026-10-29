@@ -1,12 +1,13 @@
 // Uncommitted → Committed → Pushed: plain git, started only by your own moves.
-import { copyFile, mkdir, readdir, rm } from 'node:fs/promises';
+import { readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { CONFIG } from '../config.ts';
 import { readCommitMessage, readHandOver, withHandOver } from './description.ts';
 import { BOT_PREFIX } from './events.ts';
 import { notifyDesktop } from './notify.ts';
-import { ShipBlockedError, isCommitOnBranch, pushBranch, removeCardWorktree, squashIntoTarget } from './ship-git.ts';
-import { REVIEW_VIDEO_DIR, VIDEO_DIR } from './stages.ts';
+import { MergeConflictError, ShipBlockedError, isCommitOnBranch, pushBranch, removeCardWorktree, squashIntoTarget } from './ship-git.ts';
+import { videoForTrello } from './shrink-video.ts';
+import { VIDEO_DIR } from './stages.ts';
 import type { CardState } from './state.ts';
 import { trello, type TrelloCard } from './trello.ts';
 import { waitForDeployment, type DeployResult } from './vercel.ts';
@@ -33,12 +34,11 @@ export async function attachVideos(card: TrelloCard): Promise<string[]> {
   for (const name of files) {
     const filePath = path.join(VIDEO_DIR, name);
     try {
-      const attachment = await trello.attachFile(card.id, filePath);
+      const uploadPath = await videoForTrello(filePath);
+      const attachment = await trello.attachFile(card.id, uploadPath);
       links.push(`[${name.slice(prefix.length).replace(/\.\w+$/, '')}](${attachment.url})`);
-      // Attached once: a later review records fresh videos. The newest also replaces the older one on the review page.
-      await mkdir(REVIEW_VIDEO_DIR, { recursive: true });
-      await copyFile(filePath, path.join(REVIEW_VIDEO_DIR, name));
       await rm(filePath);
+      if (uploadPath !== filePath) await rm(uploadPath);
     } catch (error) {
       console.error(`Card #${card.idShort}: video ${name} not attached: ${(error as Error).message}`);
     }
@@ -46,8 +46,14 @@ export async function attachVideos(card: TrelloCard): Promise<string[]> {
   return links;
 }
 
-/** Your move to Committed: squashes the card branch into the target branch with the message from the description. */
-export async function commitCard(card: TrelloCard, cardState: CardState, uncommittedListId: string): Promise<boolean> {
+/** How many times a merge conflict goes back to a build before the card waits for you. */
+export const MAX_CONFLICT_RETRIES = 2;
+
+/**
+ * Squashes the card branch into the target branch with the message from the description.
+ * `onConflict` takes over a merge conflict (a build that merges the target branch in) instead of reporting it.
+ */
+export async function commitCard(card: TrelloCard, cardState: CardState, uncommittedListId: string, onConflict?: (details: string) => Promise<void>): Promise<boolean> {
   const repoPath = CONFIG.repos[cardState.repo];
   const targetBranch = targetBranchOf(cardState);
 
@@ -61,10 +67,16 @@ export async function commitCard(card: TrelloCard, cardState: CardState, uncommi
     if (!message) throw new ShipBlockedError('The description has no commit message. Write it under `## Commit message` and move the card again.');
     cardState.commitHash = await squashIntoTarget(repoPath, cardState.branch, targetBranch, message);
   } catch (error) {
+    if (error instanceof MergeConflictError && onConflict && (cardState.conflictRetries ?? 0) < MAX_CONFLICT_RETRIES) {
+      cardState.conflictRetries = (cardState.conflictRetries ?? 0) + 1;
+      await onConflict(error.message);
+      return false;
+    }
     await reportBlocked(card, 'Nothing committed', error, uncommittedListId);
     return false;
   }
 
+  cardState.conflictRetries = 0;
   await trello.addComment(card.id, `${BOT_PREFIX} Committed as \`${cardState.commitHash}\` on \`${targetBranch}\`. Pushing now.`);
   notifyDesktop(`#${card.idShort} committed`, card.name);
   return true;

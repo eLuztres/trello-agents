@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 import { CONFIG } from '../config.ts';
 import type { PermissionMode } from './claude.ts';
@@ -19,8 +18,6 @@ export const STAGE_TITLES: Record<Stage, string> = { plan: 'Planning', build: 'B
 
 /** Build and review record here, outside the worktree so the videos never get committed. */
 export const VIDEO_DIR = path.resolve(import.meta.dirname, '..', 'logs', 'videos');
-/** The review page (npm run videos) plays the videos from here once they're attached to the card. */
-export const REVIEW_VIDEO_DIR = path.join(os.homedir(), 'Videos', 'changes');
 
 /** The chat agent ends with this line when the chef's comment asks to start the work. */
 export const BUILD_MARKER = 'ACTION: build';

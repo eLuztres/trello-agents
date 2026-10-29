@@ -7,7 +7,7 @@ import { runClaude } from './claude.ts';
 import { readVerdict } from './description.ts';
 import { BOT_PREFIX, isGitStage, replanStage, toCardEvent, type AgentStage, type CardEvent, type GitStage, type Stage } from './events.ts';
 import { numberCard } from './numbering.ts';
-import { notifyDesktop, openInBrowser } from './notify.ts';
+import { notifyDesktop } from './notify.ts';
 import { attachVideos, commitCard, handOverReview, pushCard } from './ship.ts';
 import { STAGE_TITLES, SYSTEM_PROMPT, VIDEO_DIR, isChangeRequest, planStageRun, takeBuildRequest } from './stages.ts';
 import { loadState, saveState, type CardState } from './state.ts';
@@ -233,6 +233,8 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
 
   cardState.lastStage = stage;
   cardState.lastStatus = 'running';
+  // A rebuild brings new work, so an earlier commit no longer counts as "already committed".
+  if (stage === 'build') cardState.commitHash = undefined;
   if (stage === 'review') cardState.reviewSessionId = run.sessionId;
   else cardState.devSessionId = run.sessionId;
   saveState(state);
@@ -274,8 +276,6 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
         .join('\n\n'),
     );
     notifyDesktop(`${title} ${status}`, card.name);
-    // Work is finished after the review: show its video right away.
-    if (result.isSuccess && stage === 'review' && videoLinks.length) openInBrowser(`http://localhost:4500/#card-${card.idShort}`);
     console.log(`${title}: ${status}`);
 
     const reviewListId = firstListId('review');
@@ -284,7 +284,15 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
       enqueue({ cardId: card.id, stage: 'review' });
     }
     if (result.isSuccess && stage === 'plan') await moveAfterPlan(card, isReady);
-    if (isReady && stage === 'review') await handOverReview(card, result.text, videoLinks, uncommittedListId);
+    if (isReady && stage === 'review') {
+      await handOverReview(card, result.text, videoLinks, uncommittedListId);
+      // A ready review ships by itself: commit, push and Done, no move needed from you.
+      const committedListId = firstListId('commit');
+      if (committedListId) {
+        await trello.moveCard(card.id, committedListId);
+        enqueue({ cardId: card.id, stage: 'commit' });
+      }
+    }
   } catch (error) {
     cardState.lastStatus = signal.aborted ? 'stopped' : 'failed';
     saveState(state);
@@ -298,6 +306,13 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
 
 /** Ready rests until you move it on; Backlog waits for your answer. */
 async function moveAfterPlan(card: TrelloCard, isReady: boolean): Promise<void> {
+  // A plan without open questions goes straight on to the build; with questions it waits in Backlog for your answer.
+  const buildListId = firstListId('build');
+  if (isReady && buildListId) {
+    await trello.moveCard(card.id, buildListId);
+    enqueue({ cardId: card.id, stage: 'build' });
+    return;
+  }
   const listId = isReady ? plannedListId : backlogListId;
   if (card.idList !== listId) await trello.moveCard(card.id, listId);
 }
@@ -310,13 +325,23 @@ async function runGitStage(stage: GitStage, card: TrelloCard, cardState: CardSta
 
   const committedListId = firstListId('commit');
   // Committed is the OK to ship: after the commit the push and the move to Done follow on their own.
-  const isCommitted = stage === 'push' || (await commitCard(card, cardState, uncommittedListId));
+  const isCommitted = stage === 'push' || (await commitCard(card, cardState, uncommittedListId, (details) => sendBackToMerge(card, details)));
   const isDone = isCommitted && Boolean(committedListId) && (await pushCard(card, cardState, uncommittedListId, committedListId!, signal));
   if (isDone) await trello.moveCard(card.id, doneListId);
   cardState.lastStatus = isDone ? 'done' : 'failed';
   saveState(state);
 }
 
+
+/** A merge conflict goes back to a build that merges the target branch in, keeps both sides and ships again. */
+async function sendBackToMerge(card: TrelloCard, details: string): Promise<void> {
+  const buildListId = firstListId('build');
+  if (!buildListId) return;
+  const feedback = `The branch no longer merges into \`${CONFIG.baseBranch}\`. Merge \`${CONFIG.baseBranch}\` into this branch, resolve every conflict by keeping the changes from both sides, run lint and tests, and fix what breaks.\n\n${details}`;
+  await trello.addComment(card.id, `${BOT_PREFIX} **Merge conflict:** back to a build that merges \`${CONFIG.baseBranch}\` in and keeps both sides. Then it ships by itself.\n\n${details}`);
+  await trello.moveCard(card.id, buildListId);
+  enqueue({ cardId: card.id, stage: 'build', feedback });
+}
 
 /** Leaves out the receipts: they only repeat "Got it" in the agent's brief. */
 async function getCommentTexts(cardId: string): Promise<string[]> {
