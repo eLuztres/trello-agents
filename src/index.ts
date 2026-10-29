@@ -10,13 +10,14 @@ import { numberCard } from './numbering.ts';
 import { notifyDesktop, openInBrowser } from './notify.ts';
 import { attachVideos, commitCard, handOverReview, pushCard } from './ship.ts';
 import { STAGE_TITLES, SYSTEM_PROMPT, VIDEO_DIR, isChangeRequest, planStageRun, takeBuildRequest } from './stages.ts';
-import { loadState, saveState, type CardState } from './state.ts';
+import { SHUTDOWN, loadState, saveState, statusAfterAbort, type CardState } from './state.ts';
 import { isOwnMove, trello, type TrelloCard, type TrelloList } from './trello.ts';
 import { commitLeftovers, ensureWorktree } from './worktree.ts';
 
 const LOG_DIR = path.resolve(import.meta.dirname, '..', 'logs');
 const MAX_COMMENT_LENGTH = 15_000; // Trello's limit is 16384
 const RECEIPT = `${BOT_PREFIX} Got it, looking at it…`;
+const SHUTDOWN_TIMEOUT_MS = 10_000;
 // Your comment `stop` on a card stops its agent.
 const STOP_COMMAND = /^stop$/i;
 
@@ -31,6 +32,7 @@ const state = loadState();
 const queue: Job[] = [];
 const running = new Map<string, AbortController>();
 const runningGitCards = new Set<string>();
+let isShuttingDown = false;
 let stageByListId: Record<string, Stage>;
 let uncommittedListId: string;
 let doneListId: string;
@@ -147,7 +149,7 @@ function removeQueuedJobs(cardId: string): void {
 }
 
 function startQueuedJobs(): void {
-  while (true) {
+  while (!isShuttingDown) {
     // Commits and pushes are quick plain git, so they don't wait for a free agent slot; but only one at a time,
     // else two pushes of the same branch clash.
     const hasFreeSlot = running.size < CONFIG.maxParallelJobs;
@@ -169,7 +171,8 @@ function startQueuedJobs(): void {
       .finally(() => {
         running.delete(job.cardId);
         runningGitCards.delete(job.cardId);
-        if (!isBusy(job.cardId)) markWorking(job.cardId, false);
+        // On shutdown the card keeps its label: the next start resumes it.
+        if (!isShuttingDown && !isBusy(job.cardId)) markWorking(job.cardId, false);
         startQueuedJobs();
       });
   }
@@ -296,8 +299,9 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
       }
     }
   } catch (error) {
-    cardState.lastStatus = signal.aborted ? 'stopped' : 'failed';
+    cardState.lastStatus = signal.aborted ? statusAfterAbort(signal.reason) : 'failed';
     saveState(state);
+    if (signal.reason === SHUTDOWN) return console.log(`${title}: stopped by the shutdown, resumes on the next start`);
     if (signal.aborted) return console.log(`${title}: stopped because the card moved`);
 
     await trello.addComment(card.id, `${BOT_PREFIX} **${STAGE_TITLES[stage]} failed** before finishing. See \`${logFile}\` and the daemon output.`);
@@ -423,7 +427,20 @@ async function findOrCreateLabel(name: string, color: string): Promise<string> {
   return existing?.id ?? (await trello.createLabel(CONFIG.boardId, name, color)).id;
 }
 
+/** Stops the agents before exiting, else they keep editing the worktrees the next start resumes in. */
+async function shutdown(signalName: string): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`${signalName}: stopping ${running.size} job(s)…`);
+  for (const controller of running.values()) controller.abort(SHUTDOWN);
+  const deadline = Date.now() + SHUTDOWN_TIMEOUT_MS;
+  while (running.size > 0 && Date.now() < deadline) await sleep(100);
+  process.exit(0);
+}
+
 async function main(): Promise<void> {
+  for (const signalName of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.on(signalName, () => void shutdown(signalName));
+
   mkdirSync(LOG_DIR, { recursive: true });
   mkdirSync(CONFIG.worktreeRoot, { recursive: true });
   mkdirSync(VIDEO_DIR, { recursive: true });

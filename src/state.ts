@@ -33,3 +33,11 @@ export function loadState(): State {
 export function saveState(state: State): void {
   writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 }
+
+/** The abort reason when the daemon stops, as opposed to your card move or `stop` comment. */
+export const SHUTDOWN = 'shutdown';
+
+/** A shutdown leaves the job `running`, so the next start resumes it. */
+export function statusAfterAbort(reason: unknown): 'running' | 'stopped' {
+  return reason === SHUTDOWN ? 'running' : 'stopped';
+}

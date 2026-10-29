@@ -47,7 +47,11 @@ export function runClaude(run: ClaudeRun, signal: AbortSignal): Promise<ClaudeRe
   ];
 
   return new Promise((resolve, reject) => {
-    const child = spawn('claude', args, { cwd: run.cwd, signal, stdio: ['pipe', 'pipe', 'pipe'] });
+    // Own process group, so a stop also kills the shells and servers the agent started.
+    const child = spawn('claude', args, { cwd: run.cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const stop = () => killGroup(child.pid);
+    if (signal.aborted) stop();
+    else signal.addEventListener('abort', stop, { once: true });
     const log = createWriteStream(run.logFile, { flags: 'a' });
     let result: StreamMessage | undefined;
 
@@ -65,6 +69,7 @@ export function runClaude(run: ClaudeRun, signal: AbortSignal): Promise<ClaudeRe
       if (!signal.aborted) reject(error);
     });
     child.on('close', (exitCode) => {
+      signal.removeEventListener('abort', stop);
       log.end();
       if (signal.aborted) return reject(new Error('stopped'));
       resolve({
@@ -74,6 +79,16 @@ export function runClaude(run: ClaudeRun, signal: AbortSignal): Promise<ClaudeRe
       });
     });
   });
+}
+
+/** SIGKILL: claude ignores a plain SIGTERM and kept running after the daemon stopped. */
+function killGroup(pid: number | undefined): void {
+  if (!pid) return;
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    // Already gone.
+  }
 }
 
 function parseLine(line: string): StreamMessage | undefined {

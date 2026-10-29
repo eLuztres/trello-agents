@@ -36,6 +36,7 @@ Every agent replies the same way: what was done or found, the result (with a scr
 ## How it works
 
 - **Move a card** to stop its running agent and start the new list's agent.
+- **Stopping or restarting the daemon** (Ctrl+C, closing the terminal, `kill`) stops its agents too, together with the shells and servers they started. Their cards keep the working label, get no "stopped" comment and resume on the next start. Only `kill -9` on the daemon leaves agents running.
 - **Every UI change comes with a video.** Build and review record the changed pages on desktop and at 375px into `logs/videos/`. The daemon attaches them to the card and starts the report with "🎬 Video: <link>". Without a UI change the report starts with "🎬 Video: no UI change".
 - Only moves made by you into **Committed** and **Pushed** commit or push. Claude sessions use your Trello account too, so AGENTS.md tells them never to move a card there.
 - Every card gets its own git worktree in `../.worktrees/`, so cards run in parallel without touching your checkout. `node_modules` and `.env` are linked from the main repo.
