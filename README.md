@@ -64,6 +64,14 @@ cd ../.worktrees/webStore-card-12 && claude --resume <session-id>   # jump into 
 
 Each report comment on the card also ends with the take-over command. You get a desktop notification when a stage finishes or fails.
 
+## Change videos
+
+```shell
+npm run videos   # http://localhost:4500, keep it open
+```
+
+Every change video in `~/Videos/changes/` (`card-<n>-<what>.mp4|webm|gif`), newest first and grouped by card. Click to play, **Delete** moves the file to the trash. A card links straight to its video with `http://localhost:4500/#card-<n>`.
+
 ## Finishing a card
 
 A ready review ships by itself: Uncommitted → Committed (commit) → push → Vercel → Done. You only step in when a card stops with a comment. By hand, for a card that stopped:

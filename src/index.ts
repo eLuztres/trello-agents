@@ -7,7 +7,7 @@ import { runClaude } from './claude.ts';
 import { readVerdict } from './description.ts';
 import { BOT_PREFIX, isGitStage, replanStage, toCardEvent, type AgentStage, type CardEvent, type GitStage, type Stage } from './events.ts';
 import { numberCard } from './numbering.ts';
-import { notifyDesktop } from './notify.ts';
+import { notifyDesktop, openInBrowser } from './notify.ts';
 import { attachVideos, commitCard, handOverReview, pushCard } from './ship.ts';
 import { STAGE_TITLES, SYSTEM_PROMPT, VIDEO_DIR, isChangeRequest, planStageRun, takeBuildRequest } from './stages.ts';
 import { loadState, saveState, type CardState } from './state.ts';
@@ -276,6 +276,8 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
         .join('\n\n'),
     );
     notifyDesktop(`${title} ${status}`, card.name);
+    // Work is finished after the review: show its video right away.
+    if (result.isSuccess && stage === 'review' && videoLinks.length) openInBrowser(`http://localhost:4500/#card-${card.idShort}`);
     console.log(`${title}: ${status}`);
 
     const reviewListId = firstListId('review');
