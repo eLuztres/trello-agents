@@ -1,6 +1,8 @@
 // Uncommitted → Committed → Pushed: plain git, started only by your own moves.
+import { execFile } from 'node:child_process';
 import { copyFile, mkdir, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { CONFIG } from '../config.ts';
 import { readCommitMessage, readHandOver, withHandOver } from './description.ts';
 import { BOT_PREFIX } from './events.ts';
@@ -11,6 +13,10 @@ import { REVIEW_VIDEO_DIR, VIDEO_DIR } from './stages.ts';
 import type { CardState } from './state.ts';
 import { trello, type TrelloCard } from './trello.ts';
 import { waitForDeployment, type DeployResult } from './vercel.ts';
+
+const execFileAsync = promisify(execFile);
+// Small enough for Trello's preview, with a palette so the colors stay true.
+const GIF_FILTER = "fps=10,scale='min(720,iw)':-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4";
 
 const targetBranchOf = (cardState: CardState) => CONFIG.targetBranches[cardState.repo] ?? CONFIG.baseBranch;
 
@@ -26,17 +32,41 @@ export async function handOverReview(card: TrelloCard, report: string, videoLink
   await trello.moveCard(card.id, uncommittedListId);
 }
 
-/** Uploads the videos a build or review recorded and returns Markdown links to them. */
+/** Trello never autoplays a video, but a GIF moves on its own: converts a recording next to it, same name. */
+export async function toGif(videoPath: string): Promise<string> {
+  const gifPath = videoPath.replace(/\.\w+$/, '.gif');
+  await execFileAsync('ffmpeg', ['-y', '-loglevel', 'error', '-i', videoPath, '-filter_complex', GIF_FILTER, '-loop', '0', gifPath]);
+  return gifPath;
+}
+
+/** The GIF first (it moves without a click), the original as the full video. */
+export function videoLink(label: string, url: string, fullVideoUrl?: string): string {
+  return fullVideoUrl ? `[${label}](${url}) ([full video](${fullVideoUrl}))` : `[${label}](${url})`;
+}
+
+/** Uploads the videos a build or review recorded (each with a GIF of it) and returns Markdown links to them. */
 export async function attachVideos(card: TrelloCard): Promise<string[]> {
   const prefix = `card-${card.idShort}-`;
   const files = (await readdir(VIDEO_DIR).catch(() => [])).filter((name) => name.startsWith(prefix));
   const links: string[] = [];
+  let coverId: string | undefined;
   for (const name of files) {
     const filePath = path.join(VIDEO_DIR, name);
+    const label = name.slice(prefix.length).replace(/\.\w+$/, '');
     try {
+      const gifPath = name.endsWith('.gif') ? undefined : await toGif(filePath).catch((error: Error) => {
+        console.error(`Card #${card.idShort}: no GIF of ${name}: ${error.message}`);
+        return undefined;
+      });
+      // A GIF over Trello's size limit must not cost the recording its upload.
+      const gif = gifPath ? await trello.attachFile(card.id, gifPath).catch((error: Error) => {
+        console.error(`Card #${card.idShort}: GIF of ${name} not attached: ${error.message}`);
+        return undefined;
+      }) : undefined;
       const uploadPath = await videoForTrello(filePath);
       const attachment = await trello.attachFile(card.id, uploadPath);
-      links.push(`[${name.slice(prefix.length).replace(/\.\w+$/, '')}](${attachment.url})`);
+      links.push(videoLink(label, gif?.url ?? attachment.url, gif && attachment.url));
+      coverId ??= gif?.id ?? (name.endsWith('.gif') ? attachment.id : undefined);
       // Attached once: a later review records fresh videos. The newest also replaces the older one on the review page.
       await mkdir(REVIEW_VIDEO_DIR, { recursive: true });
       await copyFile(filePath, path.join(REVIEW_VIDEO_DIR, name));
@@ -44,8 +74,13 @@ export async function attachVideos(card: TrelloCard): Promise<string[]> {
       if (uploadPath !== filePath) await rm(uploadPath);
     } catch (error) {
       console.error(`Card #${card.idShort}: video ${name} not attached: ${(error as Error).message}`);
+    } finally {
+      // A leftover GIF would be attached as a video of its own next time.
+      if (!name.endsWith('.gif')) await rm(filePath.replace(/\.\w+$/, '.gif'), { force: true });
     }
   }
+  // The newest change moves right on the board.
+  if (coverId) await trello.setCover(card.id, coverId).catch((error: Error) => console.error(`Card #${card.idShort}: no cover: ${error.message}`));
   return links;
 }
 

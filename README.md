@@ -37,7 +37,7 @@ Every agent replies the same way: what was done or found, the result (with a scr
 
 - **Move a card** to stop its running agent and start the new list's agent.
 - **Stopping or restarting the daemon** (Ctrl+C, closing the terminal, `kill`) stops its agents too, together with the shells and servers they started. Their cards keep the working label, get no "stopped" comment and resume on the next start. Only `kill -9` on the daemon leaves agents running.
-- **Every UI change comes with a video.** Build and review record the changed pages on desktop and at 375px into `logs/videos/`. The daemon attaches them to the card and starts the report with "🎬 Video: <link>". Without a UI change the report starts with "🎬 Video: no UI change".
+- **Every UI change comes with a video.** Build and review record the changed pages on desktop and at 375px into `logs/videos/`. The daemon attaches them to the card, each with a GIF of it that moves without a click (the first GIF becomes the card cover), and starts the report with "🎬 Video: <GIF link> (full video)". Without a UI change the report starts with "🎬 Video: no UI change".
 - Only moves made by you into **Committed** and **Pushed** commit or push. Claude sessions use your Trello account too, so AGENTS.md tells them never to move a card there.
 - Every card gets its own git worktree in `../.worktrees/`, so cards run in parallel without touching your checkout. `node_modules` and `.env` are linked from the main repo.
 - A card labeled with a repo name (`custom`, `webStore`, `trello-agents`, …) works in that repo. Any other card works in `shop-baifo` (`defaultRepo` in `config.ts`). Cards labeled `manual` never start a build or review agent.

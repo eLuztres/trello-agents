@@ -125,8 +125,10 @@ export const trello = {
   attachFile: async (cardId: string, filePath: string) => {
     const form = new FormData();
     form.set('file', new Blob([await readFile(filePath)]), path.basename(filePath));
-    return request<{ url: string; name: string }>('POST', `/cards/${cardId}/attachments`, form);
+    return request<{ id: string; url: string; name: string }>('POST', `/cards/${cardId}/attachments`, form);
   },
+
+  setCover: (cardId: string, attachmentId: string) => request('PUT', `/cards/${cardId}`, { idAttachmentCover: attachmentId }),
 
   renameCard: (cardId: string, name: string) => request('PUT', `/cards/${cardId}`, { name }),
 
