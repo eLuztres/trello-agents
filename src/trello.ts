@@ -100,9 +100,12 @@ export const trello = {
   getCard: (cardId: string) =>
     request<TrelloCard>('GET', `/cards/${cardId}`, { fields: 'idShort,idList,name,desc,shortUrl,labels' }),
 
+  getCardByNumber: (boardId: string, idShort: number) =>
+    request<TrelloCard>('GET', `/boards/${boardId}/cards/${idShort}`, { fields: 'idShort,idList,name,desc,shortUrl,labels' }),
+
   /** Newest first. */
   getComments: (cardId: string) =>
-    request<TrelloAction[]>('GET', `/cards/${cardId}/actions`, { filter: 'commentCard', limit: '50' }),
+    request<{ id: string; date: string; data: { text: string } }[]>('GET', `/cards/${cardId}/actions`, { filter: 'commentCard', limit: '50' }),
 
   addComment: (cardId: string, text: string) => request('POST', `/cards/${cardId}/actions/comments`, { text }),
 

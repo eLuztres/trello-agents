@@ -11,8 +11,8 @@ Runs a Claude Code agent for each list on the Trello board. You are the chef: a 
 | **🤖 Doing** | Developer | `auto` | Commits on `card/<n>-<slug>`, then moves the card to Testing |
 | **🤖 Testing** | Reviewer (fresh session) | `auto` | Fixes, missing tests, lint + tests, `docs/changes/card-<n>.md`, report comment. Verdict "ready" moves the card to Uncommitted |
 | **🤖 Uncommitted** | none, waits for you | | The description gets **What changed**, the **Video** links and a proposed **Commit message** you can edit |
-| **✋ Committed** | none, plain git (your move = OK to commit) | | Squashes the card branch into the target branch with the message from the description, comments the hash. Blocked (conflict, uncommitted changes in the main checkout): comments why and moves the card back |
-| **✋ Pushed** | none, plain git (your move = OK to push) | | Pushes the target branch, waits for Vercel and comments the live URL or the failure, then removes the card's worktree and branch |
+| **✋ Committed** | none, plain git (your move = OK to commit, push and deploy) | | Squashes the card branch into the target branch with the message from the description, comments the hash, then pushes like Pushed and moves the card to Done. Blocked (conflict, uncommitted changes in the main checkout): comments why and moves the card back |
+| **✋ Pushed** | none, plain git (your move = OK to push) | | Only needed to retry a push.  Pushes the target branch, waits for Vercel and comments the live URL or the failure, then removes the card's worktree and branch |
 | **✋ Done** | none, you move it by hand | | |
 | **Backlog, Done, any other list** | Chat, only when you comment | `plan` (read-only), $0.50 | A reply comment; moves the card to To Do only if you ask ("do it", "build it") |
 
@@ -27,7 +27,8 @@ Runs a Claude Code agent for each list on the Trello board. You are the chef: a 
 
 Comment on any card. Within one poll (30 s) you get "🤖 Got it, looking at it…", then a real answer:
 
-- **To Do, Doing, Testing:** the card's stage re-runs with your comment (for example, "use the existing coupon validator"). Its report starts by answering your comment. If an agent is already running on the card, your comment waits for it.
+- **To Do, Doing:** the card's stage re-runs with your comment (for example, "use the existing coupon validator"). Its report starts by answering your comment. If an agent is already running on the card, your comment waits for it.
+- **Testing, Uncommitted:** your comment sends the card back to To Do and builds it again with your words (same session), then on through Testing to Uncommitted. A plain question (ending with `?`) only gets an answer and the card stays put.
 - **Backlog, Done and other lists:** a chat agent reads the card, its comments and the code, and answers or says what it would do and why. It ends with a next step ("Move to To Do and I build it", "Need from you: …"). It changes no code, makes no commits and leaves the card where it is, unless your comment says "do it" or "build it": then it moves the card to To Do and the build starts. It also answers on `manual` cards.
 
 Every agent replies the same way: what was done or found, the result (with a screenshot or video link for UI work) and what's next. Logs stay in `logs/card-<n>.log`.
@@ -63,13 +64,20 @@ cd ../.worktrees/webStore-card-12 && claude --resume <session-id>   # jump into 
 
 Each report comment on the card also ends with the take-over command. You get a desktop notification when a stage finishes or fails.
 
+## Change videos
+
+```shell
+npm run videos   # http://localhost:4500, keep it open
+```
+
+Every change video in `~/Videos/changes/` (`card-<n>-<what>.mp4|webm|gif`), newest first and grouped by card. Click to play, **Delete** moves the file to the trash. A card links straight to its video with `http://localhost:4500/#card-<n>`.
+
 ## Finishing a card
 
 Check the card in **Uncommitted** (report, video, What changed), edit the commit message in the description if you like, then:
 
-1. Move it to **Committed**. The card branch lands on the target branch as one commit (with a `Co-Authored-By: Claude` line). The repo's main checkout must be on that branch and have no uncommitted changes.
-2. Move it to **Pushed**. The daemon pushes, removes the card's worktree and branch, and comments the Vercel result (it needs the Vercel CLI, logged in, and the repo linked with `vercel link`).
-3. Move it to **Done**.
+1. Move it to **Committed**. That's all: the card branch lands on the target branch as one commit (with a `Co-Authored-By: Claude` line), the daemon pushes, removes the card's worktree and branch, comments the Vercel result (it needs the Vercel CLI, logged in, and the repo linked with `vercel link`) and moves the card to **Done**.
+2. If the push fails, the card stays in Committed with the reason; move it to **Pushed** to try the push again.
 
 You get a desktop notification when a commit or push succeeds or fails. To finish a card by hand instead, merge the branch yourself and remove the worktree:
 

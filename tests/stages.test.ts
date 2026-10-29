@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { BUILD_MARKER, planStageRun, takeBuildRequest } from '../src/stages.ts';
+import { BUILD_MARKER, isChangeRequest, planStageRun, takeBuildRequest } from '../src/stages.ts';
 import type { CardState } from '../src/state.ts';
 import type { TrelloCard } from '../src/trello.ts';
 
@@ -23,6 +23,31 @@ describe('takeBuildRequest', () => {
 
   it('ignores the marker when it is not the last line', () => {
     assert.equal(takeBuildRequest(`${BUILD_MARKER}\nbut not yet`).shouldBuild, false);
+  });
+});
+
+describe('isChangeRequest', () => {
+  const CHECK_LISTS = ['testing', 'uncommitted'];
+
+  it('sends a comment in Testing or Uncommitted back to building', () => {
+    assert.equal(isChangeRequest('testing', CHECK_LISTS, 'The buttons are too small, make them bigger.'), true);
+    assert.equal(isChangeRequest('uncommitted', CHECK_LISTS, 'No dark box please'), true);
+  });
+
+  it('only answers a plain question', () => {
+    assert.equal(isChangeRequest('testing', CHECK_LISTS, 'Why is the goat on the left?  '), false);
+  });
+
+  it('builds when a question is followed by a request', () => {
+    assert.equal(isChangeRequest('uncommitted', CHECK_LISTS, 'Why is it blue? Make it red.'), true);
+  });
+
+  it('ignores an empty comment', () => {
+    assert.equal(isChangeRequest('testing', CHECK_LISTS, '   '), false);
+  });
+
+  it('leaves comments in other lists alone', () => {
+    assert.equal(isChangeRequest('backlog', CHECK_LISTS, 'Make it blue'), false);
   });
 });
 

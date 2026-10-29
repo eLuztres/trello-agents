@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import os from 'node:os';
 import path from 'node:path';
 import { CONFIG } from '../config.ts';
 import type { PermissionMode } from './claude.ts';
@@ -18,6 +19,8 @@ export const STAGE_TITLES: Record<Stage, string> = { plan: 'Planning', build: 'B
 
 /** Build and review record here, outside the worktree so the videos never get committed. */
 export const VIDEO_DIR = path.resolve(import.meta.dirname, '..', 'logs', 'videos');
+/** The review page (npm run videos) plays the videos from here once they're attached to the card. */
+export const REVIEW_VIDEO_DIR = path.join(os.homedir(), 'Videos', 'changes');
 
 /** The chat agent ends with this line when the chef's comment asks to start the work. */
 export const BUILD_MARKER = 'ACTION: build';
@@ -107,6 +110,13 @@ export function takeBuildRequest(text: string): { text: string; shouldBuild: boo
   // The prompt shows the marker in backticks, so agents sometimes copy them.
   const shouldBuild = lines.at(-1)?.trim().replace(/^`|`$/g, '') === BUILD_MARKER;
   return { text: shouldBuild ? lines.slice(0, -1).join('\n').trimEnd() : text, shouldBuild };
+}
+
+/** Your comment on a card you are checking (Testing, Uncommitted) asks for another round of building;
+    a plain question only gets an answer, so asking "why?" doesn't cost a whole build. */
+export function isChangeRequest(listId: string, checkListIds: string[], feedback: string): boolean {
+  const text = feedback.trim();
+  return checkListIds.includes(listId) && text !== '' && !text.endsWith('?');
 }
 
 function existingSessionId(stage: AgentStage, cardState: CardState, feedback?: string): string | undefined {

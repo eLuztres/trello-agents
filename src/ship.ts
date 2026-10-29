@@ -1,12 +1,12 @@
 // Uncommitted → Committed → Pushed: plain git, started only by your own moves.
-import { readdir, rm } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { CONFIG } from '../config.ts';
 import { readCommitMessage, readHandOver, withHandOver } from './description.ts';
 import { BOT_PREFIX } from './events.ts';
 import { notifyDesktop } from './notify.ts';
 import { ShipBlockedError, isCommitOnBranch, pushBranch, removeCardWorktree, squashIntoTarget } from './ship-git.ts';
-import { VIDEO_DIR } from './stages.ts';
+import { REVIEW_VIDEO_DIR, VIDEO_DIR } from './stages.ts';
 import type { CardState } from './state.ts';
 import { trello, type TrelloCard } from './trello.ts';
 import { waitForDeployment, type DeployResult } from './vercel.ts';
@@ -35,7 +35,9 @@ export async function attachVideos(card: TrelloCard): Promise<string[]> {
     try {
       const attachment = await trello.attachFile(card.id, filePath);
       links.push(`[${name.slice(prefix.length).replace(/\.\w+$/, '')}](${attachment.url})`);
-      // Attached once: a later review records fresh videos.
+      // Attached once: a later review records fresh videos. The newest also replaces the older one on the review page.
+      await mkdir(REVIEW_VIDEO_DIR, { recursive: true });
+      await copyFile(filePath, path.join(REVIEW_VIDEO_DIR, name));
       await rm(filePath);
     } catch (error) {
       console.error(`Card #${card.idShort}: video ${name} not attached: ${(error as Error).message}`);
@@ -50,7 +52,7 @@ export async function commitCard(card: TrelloCard, cardState: CardState, uncommi
   const targetBranch = targetBranchOf(cardState);
 
   if (cardState.commitHash && (await isCommitOnBranch(repoPath, cardState.commitHash, targetBranch))) {
-    await trello.addComment(card.id, `${BOT_PREFIX} Already committed as \`${cardState.commitHash}\` on \`${targetBranch}\`. Move the card to **Pushed** to push it.`);
+    await trello.addComment(card.id, `${BOT_PREFIX} Already committed as \`${cardState.commitHash}\` on \`${targetBranch}\`. Pushing now.`);
     return true;
   }
 
@@ -63,7 +65,7 @@ export async function commitCard(card: TrelloCard, cardState: CardState, uncommi
     return false;
   }
 
-  await trello.addComment(card.id, `${BOT_PREFIX} Committed as \`${cardState.commitHash}\` on \`${targetBranch}\`. Move the card to **Pushed** to push it.`);
+  await trello.addComment(card.id, `${BOT_PREFIX} Committed as \`${cardState.commitHash}\` on \`${targetBranch}\`. Pushing now.`);
   notifyDesktop(`#${card.idShort} committed`, card.name);
   return true;
 }

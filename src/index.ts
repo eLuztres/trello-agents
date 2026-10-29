@@ -7,9 +7,9 @@ import { runClaude } from './claude.ts';
 import { readVerdict } from './description.ts';
 import { BOT_PREFIX, isGitStage, replanStage, toCardEvent, type AgentStage, type CardEvent, type GitStage, type Stage } from './events.ts';
 import { numberCard } from './numbering.ts';
-import { notifyDesktop } from './notify.ts';
+import { notifyDesktop, openInBrowser } from './notify.ts';
 import { attachVideos, commitCard, handOverReview, pushCard } from './ship.ts';
-import { STAGE_TITLES, SYSTEM_PROMPT, VIDEO_DIR, planStageRun, takeBuildRequest } from './stages.ts';
+import { STAGE_TITLES, SYSTEM_PROMPT, VIDEO_DIR, isChangeRequest, planStageRun, takeBuildRequest } from './stages.ts';
 import { loadState, saveState, type CardState } from './state.ts';
 import { isOwnMove, trello, type TrelloCard, type TrelloList } from './trello.ts';
 import { commitLeftovers, ensureWorktree } from './worktree.ts';
@@ -33,6 +33,7 @@ const running = new Map<string, AbortController>();
 const runningGitCards = new Set<string>();
 let stageByListId: Record<string, Stage>;
 let uncommittedListId: string;
+let doneListId: string;
 let plannedListId: string;
 let backlogListId: string;
 let buildingListId: string;
@@ -193,9 +194,19 @@ function ensureCardState(card: TrelloCard): CardState {
 async function runJob(job: Job, signal: AbortSignal): Promise<void> {
   const card = await trello.getCard(job.cardId);
   const previous = state.cards[card.id];
+  // While you check a card (Testing, Uncommitted), your comment loops it back: To Do, a new build with your words,
+  // then Testing and Uncommitted again. A plain question only gets an answer.
+  const checkListIds = [firstListId('review'), uncommittedListId].filter((id): id is string => Boolean(id));
+  const buildListId = firstListId('build');
+  let loopStage: Stage | undefined;
+  if (!job.stage && job.feedback && checkListIds.includes(card.idList)) {
+    loopStage = isChangeRequest(card.idList, checkListIds, job.feedback) && buildListId ? 'build' : 'chat';
+    if (loopStage === 'build') await trello.moveCard(card.id, buildListId!);
+  }
   // Comments on cards outside the automated lists (Backlog, Done, …) get a read-only chat reply, unless they answer a plan.
   const stage =
     job.stage ??
+    loopStage ??
     stageByListId[card.idList] ??
     replanStage(previous?.lastStage, previous?.lastStatus, card.idList, [backlogListId, plannedListId]) ??
     (job.feedback ? 'chat' : undefined);
@@ -263,6 +274,8 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
         .join('\n\n'),
     );
     notifyDesktop(`${title} ${status}`, card.name);
+    // Work is finished after the review: show its video right away.
+    if (result.isSuccess && stage === 'review' && videoLinks.length) openInBrowser(`http://localhost:4500/#card-${card.idShort}`);
     console.log(`${title}: ${status}`);
 
     const reviewListId = firstListId('review');
@@ -296,10 +309,10 @@ async function runGitStage(stage: GitStage, card: TrelloCard, cardState: CardSta
   console.log(`#${card.idShort} ${STAGE_TITLES[stage]}`);
 
   const committedListId = firstListId('commit');
-  const isDone =
-    stage === 'commit'
-      ? await commitCard(card, cardState, uncommittedListId)
-      : committedListId && (await pushCard(card, cardState, uncommittedListId, committedListId, signal));
+  // Committed is the OK to ship: after the commit the push and the move to Done follow on their own.
+  const isCommitted = stage === 'push' || (await commitCard(card, cardState, uncommittedListId));
+  const isDone = isCommitted && Boolean(committedListId) && (await pushCard(card, cardState, uncommittedListId, committedListId!, signal));
+  if (isDone) await trello.moveCard(card.id, doneListId);
   cardState.lastStatus = isDone ? 'done' : 'failed';
   saveState(state);
 }
@@ -392,6 +405,7 @@ async function main(): Promise<void> {
   const lists = await trello.getLists(CONFIG.boardId);
   stageByListId = resolveLists(lists);
   uncommittedListId = findList(lists, CONFIG.uncommittedList).id;
+  doneListId = findList(lists, CONFIG.doneList).id;
   plannedListId = findList(lists, CONFIG.plannedList).id;
   backlogListId = findList(lists, CONFIG.backlogList).id;
   buildingListId = findList(lists, CONFIG.buildingList).id;

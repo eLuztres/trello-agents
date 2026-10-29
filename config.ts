@@ -13,6 +13,8 @@ export interface Config {
   backlogList: string;
   /** A review with verdict "ready" moves the card here, to wait for your OK. */
   uncommittedList: string;
+  /** A card lands here once it's committed, pushed and deployed. */
+  doneList: string;
   /** Builds run here: the daemon moves the card in from To Do when the build starts. */
   buildingList: string;
   /** Only the daemon puts cards here; your own drop into one is undone. */
@@ -36,11 +38,12 @@ export interface Config {
 export const CONFIG: Config = {
   boardId: 'd5Qaotvz',
   // ✋ lists are yours to drop cards in, 🤖 lists only the agents fill. Planning ends in Ready (or Backlog with questions).
-  // To Do starts a build, which runs in Doing and moves on to Testing. Committed and Pushed: your move is the OK.
+  // To Do starts a build, which runs in Doing and moves on to Testing. Committed is the OK for all of it: commit, push and Done follow on their own. Pushed only re-pushes.
   lists: { plan: ['✋ Planning'], build: ['✋ To Do', '🤖 Doing'], review: ['🤖 Testing'], commit: ['✋ Committed'], push: ['✋ Pushed'] },
   plannedList: '🤖 Ready',
   backlogList: '✋ Backlog',
   uncommittedList: '🤖 Uncommitted',
+  doneList: '✋ Done',
   buildingList: '🤖 Doing',
   aiLists: ['🤖 Ready', '🤖 Doing', '🤖 Testing', '🤖 Uncommitted'],
   workingLabel: { name: '🤖 AI working', color: 'purple' },
@@ -57,7 +60,7 @@ export const CONFIG: Config = {
   // Once shop-baifo has a develop branch, commit there (and let Pushed promote it).
   targetBranches: { 'shop-baifo': 'main' },
   worktreeRoot: path.join(WORKSPACE, '.worktrees'),
-  maxParallelJobs: 2,
+  maxParallelJobs: 10,
   pollIntervalSeconds: 30,
   maxBudgetUsd: { plan: 2, build: 10, review: 5, chat: 0.5 },
 };
