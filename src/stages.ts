@@ -37,6 +37,7 @@ export const SYSTEM_PROMPT = [
 function videoRule(card: TrelloCard): string {
   return [
     `UI change? Record the changed pages with Playwright (\`recordVideo\`, a few seconds each, save with \`page.video().saveAs()\`; a GIF is fine too): desktop to \`${VIDEO_DIR}/card-${card.idShort}-desktop.webm\` and 375px phone width to \`${VIDEO_DIR}/card-${card.idShort}-phone.webm\`.`,
+    'Record new videos in every run that changed anything visible, even if the card already has videos: never reuse older ones. Show the changed flow step by step, the way a visitor clicks and scrolls through it, slow enough to follow.',
     'The daemon uploads them to the card and puts "🎬 Video: <link>" at the top of your comment. No visible change? Start your final message with "🎬 Video: no UI change".',
   ].join(' ');
 }
