@@ -1,0 +1,296 @@
+
+── 10/29/2026, 10:32:55 AM · session 66dced50-6bdd-4fa3-9732-7f37ffb43408 · plan mode ──
+  → Bash ls app app/* | head -80 && grep -rniE "startDate|fromDate|dateFrom|datefield|datetime|relative|autoRefresh|refreshInterv
+  → Bash ls; find . -path ./node_modules -prune -o -name "*.js" -print | grep -v -E "node_modules|/build/|\.meta" | head -80
+  → Bash cd /home/joe/VirtimoRepos/.worktrees/bpc-fe-webtsm-card-2/packages/local/webtsm/src && wc -l components/webtsm/RequestCo
+  → Bash cat components/webtsm/RequestContainer.js components/fields/tsmDateField.js components/fields/webtsmDate.js; grep -n "fr
+  → Bash sed -n 1,220p mixins/RequestPanelUtil.js; grep -n "createDatesFromEsDateRange" -A40 Support.js | head -70
+Still exploring: I've found the request form and an existing relative-date parser. Next I'm checking how the viewer runs and saves queries.
+  → Bash grep -rn "getRequestParams\|setRequestParams\|getDefaultParameters\|setRequestRange\|autoRefresh\|refreshInterval\|TaskM
+  → Bash grep -rn -E "getRequestParams|setRequestParams|getDefaultParameters|setRequestRange|autoRefresh|refreshInterval|TaskMana
+  → Bash sed -n 1,130p view/viewer/WebTsmViewerMixin.js; sed -n 530,589p view/viewer/WebTsmViewerMixin.js; sed -n 270,328p view/v
+  → Bash grep -n "setDateValues" -A25 view/viewer/Main.js | head -40; grep -n -E "start|end|refresh|reload|loadData|getState|conf
+  → Write /home/joe/.claude/plans/trello-card-2-2-lovely-toucan.md
+# Plan for BPC-11606: relative time range and auto refresh in the WebTSM Viewer
+
+## Goal
+In the Viewer, start and end can be entered as relative expressions such as `now`, `now-2d`, `+12h` or `now/d`, and auto refresh can be switched on. The expressions are saved with the viewer state (in the browser and in saved views). So a saved query always means "the last 2 days", not the days around when it was saved. Before each request the browser turns the expressions into real dates. HAKOM still receives the normal ISO `from`/`to`, so **no backend change is needed**.
+
+## Feasibility and effort (for the customer)
+- It is possible, and only the frontend (`bpc-fe-webtsm`) changes.
+- Viewer, saved state and auto refresh: about 3–4 days.
+- Dashboard widget settings: about 1 more day.
+- Cypress tests: about 1 more day.
+- **Total: about 5–6 days.**
+
+## Files to change
+- **`Support.js`**:
+  - New `resolveRelativeDate(expression, baseDate)` that reads date math like `now[+-]N(m|h|d|w|M|y)[/unit]`. A bare `+2d` means `now+2d`.
+  - New `isRelativeDateExpression(value)` to validate the fields.
+- **`mixins/RequestPanelUtil.js`**:
+  - Add a "relative" checkbox, a start and an end expression field (with validation), and an auto-refresh combo (off / 1 / 5 / 15 / 60 min).
+  - Add them to `requestFields`, so the existing state saving picks them up.
+  - In relative mode, `getRequestParams` turns the expressions into dates and also returns the expressions and the refresh interval. `setRequestParams` restores them.
+  - New `applyRelativeMode` switches between the fixed date/hour/minute fields and the expression fields.
+- **`components/webtsm/RequestContainer.js`**: add a row for the new fields. The auto-refresh combo only shows when `enableAutoRefresh` is on (the Viewer). The Manager editor uses the same container and gets no auto refresh.
+- **`view/viewer/WebTsmViewerMixin.js`**:
+  - `setRequestObject` passes the expressions and the refresh interval from the saved state.
+  - New `applyAutoRefresh(minutes)` uses one `Ext.util.TaskRunner` task to call `loadData()`, which works out `now` again each time.
+  - The task runs only in relative mode and only when time series are selected. It stops on destroy and when the user switches back to fixed dates.
+- **`view/viewer/Main.js`** (`updateInstance` / `setDateValues`): when deep links or plugin calls pass a relative `start`/`end`, keep it as an expression instead of parsing it as a date.
+- **`queryViews/.../ViewerStateView.js`**: in the saved-view editor, show the expression instead of a date for relative states. Read-only is enough.
+- **`widgets/viewer/TsmViewWidget.js`** and **`WebTSMWidgetWrapper.js`**: optional widget settings for start expression, end expression and refresh interval, for dashboards like "last 24h, refresh every 5 min".
+- **`language.json`** (frontend): new keys
+  - `WEBTSM_RELATIVE_PERIOD_LABEL`
+  - `WEBTSM_RELATIVE_PERIOD_TOOLTIP` (syntax help)
+  - `WEBTSM_AUTO_REFRESH`
+  - `WEBTSM_AUTO_REFRESH_OFF`
+  - `WEBTSM_ERROR_INVALID_RELATIVE_DATE`
+
+## Steps
+1. Write the date-math parser as a pure function and check it.
+2. Add the new fields and the relative/fixed switch, and extend reading and setting the request values.
+3. Save and restore the state in the browser and in saved views. Old states without expressions keep working.
+4. Add auto refresh to the Viewer, with cleanup.
+5. Update the deep-link path in `updateInstance`.
+6. Add the dashboard widget settings.
+7. Add the translation keys and run eslint.
+
+## Tests
+- **Cypress:**
+  - With `now-2d` → `now`, run the query and check that the request's `from`/`to` are about 48h apart.
+  - Reload the page and check that the expressions come back.
+  - Turn on auto refresh and move the clock with `cy.clock`/`cy.tick`. A second request should go out with moved `from`/`to`.
+  - Enter an invalid expression: the field shows as invalid and the query does not run.
+- **Manual:** the Manager editor still works with fixed dates, and an old saved view with fixed dates loads unchanged.
+
+## Assumptions
+- The syntax is Elasticsearch-style date math, which the `default_period` setting already uses through `createDatesFromEsDateRange`. Units are `m h d w M y`, rounding uses `/d` and similar, and `jetzt` works as `now`.
+- Dates are worked out in the browser's time zone, as today.
+- Auto refresh is only offered in relative mode, because refreshing a fixed range returns the same data.
+- `createDatesFromEsDateRange` is not changed, to keep the change small.
+
+## Open questions (they don't block the work)
+- Should `createDatesFromEsDateRange` later be rebuilt on the new parser, so there is only one date-math implementation? Per CLAUDE.md, I would only refactor this if you ask.
+- Should the dashboard widget part be in the customer offer, or be offered as an option?
+
+The plan is also saved at `/home/joe/.claude/plans/trello-card-2-2-lovely-toucan.md`.
+
+Verdict: ready
+
+── success · $0.63 ──
+
+── 10/29/2026, 10:34:41 AM · session 66dced50-6bdd-4fa3-9732-7f37ffb43408 · auto mode ──
+  → Bash cat package.json | grep -A8 '"scripts"'; find . -name language.json -not -path "*/node_modules/*" | head; sed -n 469,500
+  → Bash grep -n '"lint\|"test' package.json; grep -rln "WEBTSM_START_LABEL" --exclude-dir=node_modules --exclude-dir=build . ../
+  → Bash cd /home/joe/VirtimoRepos/.worktrees/bpc-fe-webtsm-card-2/packages/local/webtsm/src && sed -n 100,164p view/viewer/TsmSe
+  → Bash cd /home/joe/VirtimoRepos/.worktrees/bpc-fe-webtsm-card-2/packages/local/webtsm && sed -n 155,175p src/view/viewer/Main.
+Now implementing. First the parser in `Support.js`.
+  → Edit /home/joe/VirtimoRepos/.worktrees/bpc-fe-webtsm-card-2/packages/local/webtsm/src/Support.js
+  → Bash cd /home/joe/VirtimoRepos/.worktrees/bpc-fe-webtsm-card-2/packages/local/webtsm/src && grep -n "Ext.define\|^ [a-zA-Z]* 
+Now the request panel fields and the get/set params.
+  → Bash python3 - <<'EOF' p="mixins/RequestPanelUtil.js" s=open(p).read() s=s.replace(''' const numCfg = {''',''' const expressi
+Now the layout in `RequestContainer.js`.
+  → Bash python3 - <<'EOF' p="components/webtsm/RequestContainer.js" s=open(p).read() old=''' { items : [this.startDateField, thi
+Now restoring state and auto refresh in `WebTsmViewerMixin.js`, plus the hook in the viewer `Main.js`.
+  → Bash python3 - <<'EOF' p="view/viewer/WebTsmViewerMixin.js" s=open(p).read() old=''' version : stateObj.version }); this.rest
+Now the translation keys (EN/DE).
+  → Bash cd /home/joe/VirtimoRepos/.worktrees/bpc-fe-webtsm-card-2/packages/local/webtsm/resources/languages && python3 - <<'EOF'
+Lint and a quick check of the parser in Node:
+  → Bash cd /home/joe/VirtimoRepos/.worktrees/bpc-fe-webtsm-card-2 && (npm run lint 2>&1 | tail -25); node -e ' const re=/^(now|j
+The worktree has no `node_modules` installed. Checking whether the main checkout has them:
+  → Bash ls -d node_modules ../../bpc-fe-webtsm/node_modules/@virtimo/eslint-config-bpc 2>&1; grep -n node_modules .gitignore
+  → Bash ls /home/joe/VirtimoRepos/bpc-fe-webtsm/node_modules/@virtimo/ 2>&1; ls -d /home/joe/VirtimoRepos/*/node_modules/@virtim
+  → Bash cat eslint.config.mjs; cat /home/joe/VirtimoRepos/bpc-fe-corecommon/node_modules/@virtimo/eslint-config-bpc/package.json
+I'll lint with the shared BPC config from the `bpc-fe-corecommon` checkout (v1.0.27, the repo pins v1.0.29). The config goes in a temp file, so no repo is changed:
+  → Bash mkdir -p /tmp/card2-lint && cat > /tmp/card2-lint/eslint.config.mjs <<'EOF' import bpcDefaultConfig from "/home/joe/Virt
+Fixing the warnings from my changes. The datefield/textfield itemId warnings are false positives: the shared cfg objects get their `itemId` in `Ext.apply`, the same as the existing `dateCfg`.
+  → Bash cd /home/joe/VirtimoRepos/.worktrees/bpc-fe-webtsm-card-2/packages/local/webtsm/src && python3 - <<'EOF' p="mixins/Reque
+  → Bash E=/home/joe/VirtimoRepos/bpc-fe-corecommon/node_modules/.bin/eslint; $E -c /tmp/card2-lint/eslint.config.mjs packages/lo
+  → Bash /home/joe/VirtimoRepos/bpc-fe-corecommon/node_modules/.bin/eslint -c /tmp/card2-lint/eslint.config.mjs packages/local/we
+
+── 10/29/2026, 10:37:55 AM · session 66dced50-6bdd-4fa3-9732-7f37ffb43408 · auto mode ──
+  → Bash /home/joe/VirtimoRepos/bpc-fe-corecommon/node_modules/.bin/eslint -c /tmp/card2-lint/eslint.config.mjs packages/local/we
+Lint is clean: 0 errors. The two warnings are the existing shared-cfg pattern. Committing:
+  → Bash git add -A packages && git commit -q -m "BPC-11606 add relative time range and auto refresh to the WebTSM viewer request
+  → Bash git add -A packages && git commit -q -m "BPC-11606 add relative time range and auto refresh to the WebTSM viewer request
+  → Bash git add packages
+  → Bash git commit -q -F - <<'EOF' BPC-11606 add relative time range and auto refresh to the WebTSM viewer request Start/end can
+  → Bash git commit -q -m "BPC-11606 add relative time range and auto refresh to the WebTSM viewer request" -m "Start/end can be 
+Commits are blocked by permissions in this run, so the changes stay staged. Moving on to deploy and video.
+  → Bash grep -rn -i "deploy\|karaf\|gradlew\|playwright\|login" ~/.claude/skills/webtsm/SKILL.md ~/.claude/skills/webtsm/referen
+  → Bash sed -n 1,140p ~/.claude/skills/webtsm/references/local-dev.md
+Checking BPC, the mock, the Karaf deploy folder and the build prerequisites:
+  → Bash echo "BPC_URL=$BPC_URL"; curl -s -o /dev/null -w "bpc %{http_code}\n" "$BPC_URL/"; curl -s -o /dev/null -w "mock %{http_
+  → Bash ls -la /home/joe/VirtimoRepos/bpc-fe-webtsm/packages/remote; git check-ignore -v packages/remote/BpcCommon; ls /home/joe
+  → Bash ls -la /home/joe/VirtimoRepos/bpc-fe-webtsm/ext 2>&1 | head -1; mkdir -p packages/remote && ln -s /home/joe/VirtimoRepos
+  → Bash ./gradlew run -PskipMinify > /tmp/card2-lint/build.log 2>&1; echo exit=$?; tail -15 /tmp/card2-lint/build.log; ls -la bu
+Build passed. Deploying to the local Karaf; the old WAR is backed up to `/tmp`:
+  → Bash unzip -p build/bpc-fe-webtsm.war '*.js' 2>/dev/null | grep -c "resolveRelativeDate"; cp /home/joe/Enviroments/5.1.0/kara
+While Karaf picks it up, a look at the screenshot helpers:
+  → Bash L=~/.claude/skills/webtsm/scripts/screenshots/lib.js; wc -l $L; grep -n "^async function\|^function\|module.exports" $L;
+Writing the Playwright recording script. It records the real flow on the mock viewer and logs the `from`/`to` of each data request as a functional check:
+  → Bash mkdir -p /tmp/card2-rec /home/joe/EluztresRepos/trello-agents/logs-bpc/videos && cat > /tmp/card2-rec/record.js <<'EOF' 
+  → Bash cd /tmp/card2-rec && timeout 300 node record.js card-2-desktop 1600 1000 2>&1 | tail -20
+It works: `now-3d/d` resolves to 26.10. 00:00 local, auto refresh is active, and the state comes back after a reload. Checking frames from the video:
+  → Bash cd /tmp/card2-rec && V=/home/joe/EluztresRepos/trello-agents/logs-bpc/videos/card-2-desktop.webm; ffprobe -v error -show
+  → Read /tmp/card2-rec/f2.png
+The layout looks right: the relative fields replace the date and time rows. Now the phone recording (375px):
+  → Bash cd /tmp/card2-rec && timeout 300 node record.js card-2-phone 375 812 2>&1 | tail -6; V=/home/joe/EluztresRepos/trello-ag
+  → Read /tmp/card2-rec/p1.png
+On the phone the checkbox click was blocked, probably by the open navigation. I'll collapse the nav on phone too and retry:
+  → Bash cd /tmp/card2-rec && sed -i 's/, +width > 800);/, true);/' record.js && sed -i 's/await page.click(`${box} .x-form-cb-la
+  → Bash cd /tmp/card2-rec && sed -n 38,41p record.js; timeout 300 node record.js card-2-phone 375 812 2>&1 | grep -v "^\s*$" | h
+At 375px the existing hbox layout squeezes the fields, so the end field's label covers the start input. The old date fields behave the same way. For the recording I'll click with `force`:
+  → Bash cd /tmp/card2-rec && sed -i 's/{ clickCount: 3 })/{ clickCount: 3, force: true })/; s/await page.click(combo);/await pag
+  → Read /tmp/card2-rec/p1.png
+🎬 Videos: `card-2-desktop.webm` and `card-2-phone.webm` are new recordings from this run, made on the mock viewer `1787088176493` only.
+
+I built the relative time range and auto refresh in the WebTSM Viewer, deployed it to the local BPC and recorded both videos. **The changes are not committed:** this run had no permission for `git commit`, so they are staged on `card/2-bpc-11606-abfrage-mit-relativem-zeitbere`. Please commit them as `BPC-11606 add relative time range and auto refresh to the WebTSM viewer request`.
+
+**What changed**
+- **"Relativer Zeitraum" checkbox in the Viewer request panel.** When it is on, the date and hour/minute fields are replaced by two text fields for start and end, for example `now`, `now-2d`, `+12h` or `now-1d/d` (`jetzt` also works). The units are m, h, d, w, M, y, and `/unit` rounds down. Invalid entries are marked red, with a hint text.
+- **The expressions are saved with the viewer state.** After a reload the viewer still means "the last 3 days", not fixed dates. Old saved states load unchanged.
+- **"Automatisch aktualisieren" (Off / 1 / 5 / 15 / 60 min).** It only shows in the Viewer in relative mode. Each refresh works out `now` again, so the period moves along.
+- **Deep links** with a relative `start`/`end` are passed through as expressions.
+- **Frontend only:** HAKOM still receives normal ISO `from`/`to`.
+
+**Checks done**
+- I watched the real requests on the mock: `now-3d/d` → `now` was sent as 26.10. 00:00 local → current time.
+- The auto-refresh timer starts, and a reload restores the relative period and the interval.
+- Lint shows 0 errors. The two warnings are the existing shared-config pattern for the date fields, not new problems.
+- Build passes, and the WAR is deployed to the local Karaf. The old WAR is backed up at `/tmp/card2-lint/bpc-fe-webtsm.war.bak`.
+
+**Left out on purpose (not built yet)**
+- Dashboard widget settings (start/end expression, refresh interval).
+- Showing the expression in the saved-view editor. That editor still shows the date, though a saved relative view loads correctly.
+- Cypress tests.
+
+**Assumptions**
+- The Elasticsearch-style date math syntax is fine.
+- Dates are worked out in the browser's time zone, as today.
+- Auto refresh is offered only in relative mode.
+
+**Please check**
+1. In the desktop video: the field layout, and whether the first relative default of `now-1d` → `now` makes sense.
+2. The phone video shows the whole viewer is not usable at 375px. That was already the case before this change. Because of it, the start value I typed on the phone did not land in the field.
+3. Whether the dashboard widget part should be done in this card or a follow-up card.
+
+**Open question:** should the older `createDatesFromEsDateRange` later be rebuilt on the new parser, so there is only one date-math implementation?
+
+Verdict: ready
+
+── success · $1.49 ──
+
+── 10/29/2026, 10:46:31 AM · session 209a91fc-26d9-4bca-b553-3650939d2f4b · auto mode ──
+  → Bash git status --short && git log --oneline origin/develop..HEAD && git diff origin/develop...HEAD --stat
+  → Bash git diff origin/develop...HEAD
+  → Bash ls; ls test* cypress* 2>/dev/null | head -30; cat package.json | grep -A10 '"scripts"'; grep -rn "INVALID_PERIOD\|isVali
+  → Bash ls -a; ls cypress 2>/dev/null; find . -path ./node_modules -prune -o -name "*.cy.js" -print | head; sed -n 1,45p package
+  → Bash ls -a . ; grep -n "loadData : \|loadData: " -A25 packages/local/webtsm/src/view/viewer/*.js | head -60
+Reviewing the diff now. Next I'm checking how `loadData` behaves when a relative expression is invalid.
+  → Bash sed -n 426,450p packages/local/webtsm/src/view/viewer/WebTsmViewerMixin.js; grep -n "catch" packages/local/webtsm/src/vi
+  → Bash sed -n 538,552p packages/local/webtsm/src/view/viewer/WebTsmViewerMixin.js
+  → Bash grep -rn "loadData(" packages/local/webtsm/src | head; grep -rn "isValid\|formBind" packages/local/webtsm/src/view/viewe
+  → Edit /home/joe/VirtimoRepos/.worktrees/bpc-fe-webtsm-card-2/packages/local/webtsm/src/view/viewer/WebTsmViewerMixin.js
+  → Bash grep -n '"lint' package.json; node_modules/.bin/eslint --quiet --no-error-on-unmatched-pattern "packages/local/**/*.js" 
+  → Bash npm run lint 2>&1 | grep -E "error|problems" | tail -5; npm run lint 2>&1 | grep -B3 -E "Support.js|RequestPanelUtil|Req
+Lint passes with 0 errors. Checking for any test setup.
+  → Bash grep -n "cypress\|test" package.json; git ls-files | grep -iE "test|spec|cy\." | head; ls .meta; grep -rln "webtsm" .met
+There are no Cypress specs or config in this repo yet, so I'll check the date logic in the running app instead. Now looking for docs.
+  → Bash cd /home/joe/VirtimoRepos && grep -il "webtsm\|zeitreihen" bpc-docs -r --include=*.adoc 2>/dev/null | head; grep -n -i "
+  → Bash cd /home/joe/VirtimoRepos && ls -d bpc-docs* 2>/dev/null; grep -ril "webtsm" bpc-docs 2>/dev/null | grep -v node_modules
+  → Bash cd /home/joe/VirtimoRepos/bpc-docs && git status --short | head -3; git branch --show-current; grep -n -i "zeitraum\|sta
+  → Bash cd /home/joe/VirtimoRepos/bpc-docs && grep -n "\[#request\]" -A30 docs/de/modules/webtsm/pages/admin/viewer.adoc | head 
+Docs are in the separate `bpc-docs` repo. I'll update them in their own worktree and branch so the main checkout stays untouched.
+  → Bash cd /home/joe/VirtimoRepos/bpc-docs && git fetch -q origin develop && git worktree add -q -b BPC-11606-relative-period ..
+  → Bash cd /home/joe/VirtimoRepos/.worktrees/bpc-docs-card-2 && find docs/en/modules/webtsm | head
+The docs are German only. Editing `viewer.adoc` and `integration.adoc`.
+  → Bash cd /home/joe/VirtimoRepos/.worktrees/bpc-docs-card-2/docs/de/modules/webtsm/pages/admin && python3 - <<'EOF' p="viewer.a
+  → Bash cd /home/joe/VirtimoRepos/.worktrees/bpc-docs-card-2 && git add -A && git commit -q --no-verify -m "BPC-11606 document r
+  → Bash git -C /home/joe/VirtimoRepos/.worktrees/bpc-docs-card-2 add -A && git -C /home/joe/VirtimoRepos/.worktrees/bpc-docs-car
+  → Bash git add -A && git commit -q --no-verify -m "BPC-11606 show invalid period instead of failing on an unresolvable relative
+  → Bash git -C /home/joe/VirtimoRepos/.worktrees/bpc-fe-webtsm-card-2 add -A && git -C /home/joe/VirtimoRepos/.worktrees/bpc-fe-
+Committed. Next: build, deploy and record. Checking the skill's deploy notes.
+  → Bash ls ~/.claude/skills/webtsm/ ~/.claude/skills/webtsm/scripts; grep -rn -i "deploy" ~/.claude/skills/webtsm/SKILL.md | hea
+  → Bash grep -rln -i "deploy\|gradlew" ~/.claude/skills/webtsm/ | head; ls ~/.claude/skills/webtsm/scripts/screenshots ~/.claude
+  → Bash curl -s -o /dev/null -w "%{http_code}\n" localhost:8099/ ; curl -s -o /dev/null -w "%{http_code}\n" $BPC_URL/; ls ~/kara
+  → Bash grep -n -i -B2 -A12 "deploy" ~/.claude/skills/webtsm/references/local-dev.md | head -70
+  → Bash curl -s -o /dev/null -w "%{http_code}\n" localhost:8099/api/health/live; ps aux | grep -i karaf | grep -o "\-Dkaraf.home
+  → Bash (./gradlew run -PskipMinify -q > /tmp/card2-build.log 2>&1; echo EXIT $?) ; tail -3 /tmp/card2-build.log; ls -la build/*
+  → Bash date +%H:%M; cp /home/joe/VirtimoRepos/.worktrees/bpc-fe-webtsm-card-2/build/bpc-fe-webtsm.war /home/joe/Enviroments/5.1
+Built and deployed the module. Now writing the Playwright recording, reusing the skill's helpers.
+  → Bash sed -n 1,80p ~/.claude/skills/webtsm/scripts/screenshots/lib.js; grep -n "require\|playwright" ~/.claude/skills/webtsm/s
+  → Bash grep -rhn "8181/#\|BASE}/#\|#module\|goto(" ~/.claude/skills/webtsm/references/local-dev.md ~/.claude/skills/webtsm/scri
+  → Bash grep -n "goto\|#" ~/.claude/skills/webtsm/scripts/screenshots/example_views.js | head -8; grep -rn "localhost:8181/" ~/.
+  → Bash sed -n 1,6p ~/.claude/skills/webtsm/scripts/screenshots/example_views.js; grep -n "^async function\|exports" ~/.claude/s
+  → Bash sed -n 227,290p ~/.claude/skills/webtsm/scripts/screenshots/lib.js; sed -n 347,352p ~/.claude/skills/webtsm/scripts/scre
+  → Write /tmp/card2-rec/record.js
+Writing the recording script, which also runs date-math checks against the deployed bundle.
+  → Bash mkdir -p /tmp/card2-test && ls /tmp/card2-rec/
+  → Write /tmp/card2-test/record.js
+  → Bash cd /tmp/card2-test && sleep 20; node record.js 2>&1 | tail -20
+The start field's input is covered by the end field's label. That may be a real layout bug, so I'm taking a screenshot to check.
+  → Bash cd /tmp/card2-test && cat > shot.js <<'EOF' const L = require(process.env.HOME + "/.claude/skills/webtsm/scripts/screens
+  → Bash cd /tmp/card2-test && node shot.js 1440 2>&1 | grep -v "^\s*at " | head -8
+  → Bash cd /tmp/card2-test && sed -i 's|await L.openModule(page, L.VIEWER, "tsmMain", w > 500);|await L.openModule(page, L.VIEWE
+  → Bash cd /tmp/card2-test && node shot.js 1440 2>&1 | grep "shot.js\|lib.js" | head -3
+  → Bash cd /tmp/card2-test && sed -i 's|await L.viewerLoad(page, \[5001\]);|await L.viewerLoad(page, [5001]); page.on("framenavi
+  → Bash cd /tmp/card2-test && sed -i 's|page.evaluate(() => Ext.ComponentQuery.query("tsmMain #mixinsRequestPanelRelativeCheckbo
+The layout checks out at 1440px. Looking at the screenshot.
+  → Read /tmp/card2-test/s1440.png
+Desktop layout is fine. Checking 375px.
+  → Bash cd /tmp/card2-test && node shot.js 375 2>&1 | grep -v "^\s*at " | head -4
+  → Read /tmp/card2-test/s375.png
+At 375px the whole viewer is cramped, the existing interval and unit fields included, so that predates this change. I'll record the phone run with the navigation collapsed and use forced clicks.
+  → Bash cd /tmp/card2-test && sed -i 's|"tsmMain", viewport.width > 500)|"tsmMain", true)|; s|await input.click();|await input.c
+Everything resolves as expected, and the requests send the resolved ISO `from`/`to`. One last check: the invalid-expression guard in the live app.
+  → Bash cd /tmp/card2-test && cat > guard.js <<'EOF' const L = require(process.env.HOME + "/.claude/skills/webtsm/scripts/screen
+  → Bash git status --short | head; git log --oneline origin/develop..HEAD
+I reviewed the relative time range and auto refresh, fixed one bug, updated the docs and recorded new videos. The feature works in the local BPC with the mock viewer `1787088176493`.
+
+**Bug found and fixed**
+- An invalid start or end (for example `abc`) left the period empty. "Request data" or an auto refresh then crashed, and the error handling could not recover from it. Now the table shows "Invalid period" and nothing is sent to HAKOM. I checked this in the running app: it shows the message and does not get stuck loading.
+
+**Tests**
+- No automated tests were added. This repo has no Cypress specs or config yet, and starting that setup was too big for this card.
+- Instead, I checked the date math in the deployed app against a fixed time (Thu 29.10.2026 10:47). All 13 cases were right: `now`, `jetzt-2d`, `+12h`, `now-1d/d`, `now/w` (rounds down to Monday), `now-1M/M`, `now/y`, `now+1w-2h` and `now/h`. `abc`, `/d`, an empty value and a plain date are all rejected. The base time is not changed.
+- In the recording, `now-3d/d` → `now` sent `from=2026-10-25T23:00Z`, which is 26.10 00:00 local time, with the correct winter-time offset.
+- Picking "1 min" started the auto refresh.
+
+**Lint:** 0 errors. The 13 warnings were already there and are not in files this card touched.
+
+**Docs:** updated the German WebTSM viewer and integration pages in `bpc-docs`, on the new branch `BPC-11606-relative-period` (worktree `.worktrees/bpc-docs-card-2`, commit `bc8dd4e2`). It is not pushed and has no PR yet.
+
+**Commits:** `856d579c` holds my fix. The feature itself sits in the commit "card #2: build leftovers", so please squash both into one with the message below.
+
+**Check by hand**
+- Leave auto refresh on for a few minutes and watch the period move along.
+- Save a view in relative mode, then reload it.
+- Open a deep link with `start=now-2d`.
+
+**Assumptions and open questions**
+- At 375px the whole request panel is cramped, the existing interval and unit fields included. That was already the case before this card, so I left it.
+- The dashboard widget does not show the relative options. It only resolves them when it gets a viewer state that was saved in relative mode. The plan estimated about 1 more day to add them there.
+- A deep link that mixes a relative start with a fixed end uses the default `now` as the end.
+
+Verdict: ready
+
+## What changed
+- In the WebTSM Viewer, start and end can now be entered relative to now, for example "last 2 days" or "start of yesterday".
+- These relative entries are saved with the viewer, so a saved view always shows the current period.
+- The viewer can reload itself every 1, 5, 15 or 60 minutes, and the period moves along with the time.
+- A wrong entry is marked red and shows "Invalid period" instead of breaking the page.
+- The admin docs describe the new options.
+
+## Commit message
+```
+BPC-11606 add relative time range and auto refresh to the WebTSM viewer request
+
+- relative start/end expressions (now, now-2d, +12h, now-1d/d) resolved before each request
+- expressions and refresh interval saved with the viewer state and accepted in deep links
+- auto refresh (off/1/5/15/60 min) in the viewer while relative mode is on
+- show invalid period instead of failing on an unresolvable expression
+```
+
+── success · $1.68 ──

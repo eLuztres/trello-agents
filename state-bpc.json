@@ -1,0 +1,28 @@
+{
+  "cards": {
+    "6ae2fb0da77ef2c268cf7eda": {
+      "idShort": 7,
+      "name": "#7 BPC-11802 Bearbeiten von Stammdaten und Werten: Speichern schlägt fehl, falsche Erfolgsmeldungen, Anzeigefehler im Editor",
+      "repo": "bpc-fe-webtsm",
+      "branch": "card/7-bpc-11802-bearbeiten-von-stammdaten-und",
+      "worktree": "/home/joe/VirtimoRepos/.worktrees/bpc-fe-webtsm-card-7",
+      "lastStage": "review",
+      "lastStatus": "done",
+      "devSessionId": "dc4c94ad-f037-42bc-bb64-177d0888d6ba",
+      "reviewSessionId": "d4e85edf-5e87-4a95-b83f-564a10bebafe"
+    },
+    "6ae2fb092e97623578e613da": {
+      "idShort": 2,
+      "name": "#2 BPC-11606 Abfrage mit relativem Zeitbereich",
+      "repo": "bpc-fe-webtsm",
+      "branch": "card/2-bpc-11606-abfrage-mit-relativem-zeitbere",
+      "worktree": "/home/joe/VirtimoRepos/.worktrees/bpc-fe-webtsm-card-2",
+      "lastStage": "commit",
+      "lastStatus": "done",
+      "devSessionId": "66dced50-6bdd-4fa3-9732-7f37ffb43408",
+      "commitHash": "856d579c",
+      "reviewSessionId": "209a91fc-26d9-4bca-b553-3650939d2f4b"
+    }
+  },
+  "lastActionId": "6ae318da801c563c8dccdd85"
+}

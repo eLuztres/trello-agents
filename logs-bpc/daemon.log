@@ -1,0 +1,22 @@
+
+> start:bpc
+> BOARD=bpc node --disable-warning=ExperimentalWarning --env-file=.env src/index.ts
+
+file:///home/joe/EluztresRepos/trello-agents/src/index.ts:53
+    listNames.map((listName) => [findList(lists, listName).id, stage]),
+              ^
+
+TypeError: Cannot read properties of undefined (reading 'map')
+    at file:///home/joe/EluztresRepos/trello-agents/src/index.ts:53:15
+    at Array.flatMap (<anonymous>)
+    at resolveLists (file:///home/joe/EluztresRepos/trello-agents/src/index.ts:52:48)
+    at main (file:///home/joe/EluztresRepos/trello-agents/src/index.ts:481:19)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///home/joe/EluztresRepos/trello-agents/src/index.ts:505:1
+
+Node.js v24.21.0
+
+> start:bpc
+> BOARD=bpc node --disable-warning=ExperimentalWarning --env-file=.env src/index.ts
+
+Watching board 3e6DyCWx as @eluztres. Only your own cards, moves and comments start agents.
