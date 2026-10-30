@@ -7,15 +7,14 @@ import { runClaude } from './claude.ts';
 import { readVerdict } from './description.ts';
 import { BOT_PREFIX, isGitStage, replanStage, toCardEvent, type AgentStage, type CardEvent, type GitStage, type Stage } from './events.ts';
 import { numberCard } from './numbering.ts';
-import { notifyDesktop, openInBrowser } from './notify.ts';
+import { notifyDesktop } from './notify.ts';
 import { mergeTargetIntoBranch } from './ship-git.ts';
 import { MAX_CONFLICT_RETRIES, attachVideos, commitCard, handOverReview, pushCard, targetBranchOf } from './ship.ts';
-import { STAGE_TITLES, SYSTEM_PROMPT, VIDEO_DIR, isChangeRequest, planStageRun, takeBuildRequest } from './stages.ts';
+import { LOG_DIR, STAGE_TITLES, SYSTEM_PROMPT, VIDEO_DIR, isChangeRequest, planStageRun, takeBuildRequest } from './stages.ts';
 import { SHUTDOWN, loadState, saveState, statusAfterAbort, type CardState } from './state.ts';
 import { isOwnMove, trello, type TrelloCard, type TrelloList } from './trello.ts';
 import { commitLeftovers, ensureWorktree } from './worktree.ts';
 
-const LOG_DIR = path.resolve(import.meta.dirname, '..', 'logs');
 const MAX_COMMENT_LENGTH = 15_000; // Trello's limit is 16384
 const RECEIPT = `${BOT_PREFIX} Got it, looking at it…`;
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -283,14 +282,14 @@ async function runJob(job: Job, signal: AbortSignal): Promise<void> {
         .join('\n\n'),
     );
     notifyDesktop(`${title} ${status}`, card.name);
-    // Work is finished after the review: show its video right away.
-    if (result.isSuccess && stage === 'review' && videoLinks.length) openInBrowser(`http://localhost:4500/#card-${card.idShort}`);
     console.log(`${title}: ${status}`);
 
     const reviewListId = firstListId('review');
     if (result.isSuccess && stage === 'build' && reviewListId) {
       await trello.moveCard(card.id, reviewListId);
       enqueue({ cardId: card.id, stage: 'review' });
+    } else if (result.isSuccess && stage === 'build') {
+      await trello.moveCard(card.id, uncommittedListId);
     }
     if (result.isSuccess && stage === 'plan') await moveAfterPlan(card, isReady);
     if (isReady && stage === 'review') {
@@ -336,7 +335,7 @@ async function runGitStage(stage: GitStage, card: TrelloCard, cardState: CardSta
   const committedListId = firstListId('commit');
   // Committed is the OK to ship: after the commit the push and the move to Done follow on their own.
   const isCommitted = stage === 'push' || (await commitCard(card, cardState, uncommittedListId, (details) => sendBackToMerge(card, details)));
-  const isDone = isCommitted && Boolean(committedListId) && (await pushCard(card, cardState, uncommittedListId, committedListId!, signal));
+  const isDone = isCommitted && (CONFIG.isLocalOnly || (Boolean(committedListId) && (await pushCard(card, cardState, uncommittedListId, committedListId!, signal))));
   if (isDone) await trello.moveCard(card.id, doneListId);
   cardState.lastStatus = isDone ? 'done' : 'failed';
   saveState(state);
@@ -425,7 +424,8 @@ function nextStepHint(stage: AgentStage, isSuccess: boolean, isReady: boolean): 
   const [build, review, commit] = [CONFIG.lists.build?.join(' or '), CONFIG.lists.review?.[0], CONFIG.lists.commit?.[0]];
   if (stage === 'plan' && isReady) return `Moving the card to **${CONFIG.plannedList}**. Move it to **${build}** when you want it built, or comment to change the plan.`;
   if (stage === 'plan') return `Moving the card to **${CONFIG.backlogList}**. Answer the questions in a comment and I plan again.`;
-  if (stage === 'build') return `Moving the card to **${review}** for review and docs.`;
+  if (stage === 'build' && review) return `Moving the card to **${review}** for review and docs.`;
+  if (stage === 'build') return `Moving the card to **${CONFIG.uncommittedList}**. Check it, then move it to **${commit}** to commit it.`;
   if (isReady) return `Moving the card to **${CONFIG.uncommittedList}**. Check the description and edit the commit message there if you like, then move the card to **${commit}** to commit it.`;
   return `Not ready: comment what to change, or move the card back to **${build}** with a comment.`;
 }

@@ -11,7 +11,7 @@ import { REVIEW_VIDEO_DIR } from './stages.ts';
 import { loadState } from './state.ts';
 import { trello, type TrelloList } from './trello.ts';
 
-const PORT = 4500;
+const PORT = CONFIG.name === 'baifo' ? 4500 : 4501;
 const ALLOWED_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
 const MAX_MESSAGE_LENGTH = 5000;
 // OpenAI's limit for one audio file.

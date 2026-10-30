@@ -9,6 +9,7 @@ import { BOT_PREFIX } from './events.ts';
 import { notifyDesktop } from './notify.ts';
 import { MergeConflictError, ShipBlockedError, isCommitOnBranch, pushBranch, removeCardWorktree, squashIntoTarget } from './ship-git.ts';
 import { videoForTrello } from './shrink-video.ts';
+import { git } from './worktree.ts';
 import { REVIEW_VIDEO_DIR, VIDEO_DIR } from './stages.ts';
 import type { CardState } from './state.ts';
 import { trello, type TrelloCard } from './trello.ts';
@@ -95,6 +96,8 @@ export async function commitCard(card: TrelloCard, cardState: CardState, uncommi
   const repoPath = CONFIG.repos[cardState.repo];
   const targetBranch = targetBranchOf(cardState);
 
+  if (CONFIG.isLocalOnly) return keepCardBranch(card, cardState);
+
   if (cardState.commitHash && (await isCommitOnBranch(repoPath, cardState.commitHash, targetBranch))) {
     await trello.addComment(card.id, `${BOT_PREFIX} Already committed as \`${cardState.commitHash}\` on \`${targetBranch}\`. Pushing now.`);
     return true;
@@ -117,6 +120,14 @@ export async function commitCard(card: TrelloCard, cardState: CardState, uncommi
   cardState.conflictRetries = 0;
   await trello.addComment(card.id, `${BOT_PREFIX} Committed as \`${cardState.commitHash}\` on \`${targetBranch}\`. Pushing now.`);
   notifyDesktop(`#${card.idShort} committed`, card.name);
+  return true;
+}
+
+/** Local-only boards: the card branch is the result. Its worktree stays, for you to push or open a pull request. */
+async function keepCardBranch(card: TrelloCard, cardState: CardState): Promise<boolean> {
+  cardState.commitHash = (await git(cardState.worktree, ['rev-parse', '--short', 'HEAD'])).trim();
+  await trello.addComment(card.id, `${BOT_PREFIX} Done on branch \`${cardState.branch}\` (${cardState.commitHash}), nothing pushed. Worktree: \`${cardState.worktree}\`.`);
+  notifyDesktop(`#${card.idShort} done on its branch`, card.name);
   return true;
 }
 

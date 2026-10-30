@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { CONFIG } from '../config.ts';
 
-const STATE_FILE = path.resolve(import.meta.dirname, '..', 'state.json');
+const STATE_FILE = path.resolve(import.meta.dirname, '..', CONFIG.name === 'baifo' ? 'state.json' : `state-${CONFIG.name}.json`);
 
 export interface CardState {
   idShort: number;

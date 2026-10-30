@@ -17,10 +17,12 @@ export interface StageRun {
 
 export const STAGE_TITLES: Record<Stage, string> = { plan: 'Planning', build: 'Building', review: 'Testing & docs', chat: 'Chat', commit: 'Committing', push: 'Pushing' };
 
+export const LOG_DIR = path.resolve(import.meta.dirname, '..', CONFIG.name === 'baifo' ? 'logs' : `logs-${CONFIG.name}`);
+
 /** Build and review record here, outside the worktree so the videos never get committed. */
-export const VIDEO_DIR = path.resolve(import.meta.dirname, '..', 'logs', 'videos');
+export const VIDEO_DIR = path.join(LOG_DIR, 'videos');
 /** The review page (npm run videos) plays the videos from here once they're attached to the card. */
-export const REVIEW_VIDEO_DIR = path.join(os.homedir(), 'Videos', 'changes');
+export const REVIEW_VIDEO_DIR = path.join(os.homedir(), 'Videos', CONFIG.name === 'baifo' ? 'changes' : `changes-${CONFIG.name}`);
 
 /** The chat agent ends with this line when the chef's comment asks to start the work. */
 export const BUILD_MARKER = 'ACTION: build';
@@ -40,6 +42,7 @@ export const SYSTEM_PROMPT = [
 function videoRule(card: TrelloCard): string {
   return [
     `UI change? Record the changed pages with Playwright (\`recordVideo\`, a few seconds each, save with \`page.video().saveAs()\`; a GIF is fine too): desktop to \`${VIDEO_DIR}/card-${card.idShort}-desktop.webm\` and 375px phone width to \`${VIDEO_DIR}/card-${card.idShort}-phone.webm\`.`,
+    CONFIG.videoLogin,
     'Record new videos in every run that changed anything visible, even if the card already has videos: never reuse older ones. Show the changed flow step by step, the way a visitor clicks and scrolls through it, slow enough to follow.',
     'The daemon uploads them to the card and puts "🎬 Video: <link>" at the top of your comment. No visible change? Start your final message with "🎬 Video: no UI change".',
   ].join(' ');
@@ -56,18 +59,20 @@ function stageTask(stage: AgentStage, card: TrelloCard, baseBranch: string): str
       ].join('\n');
     case 'build':
       return [
-        'Stage: BUILD. Implement this card (or continue it, and handle any chef comment above) following AGENTS.md.',
-        'Run `npm run lint` and `npm run test` and fix what fails. Commit on the current branch with a clear message.',
+        'Stage: BUILD. Implement this card (or continue it, and handle any chef comment above) following the repo\'s AGENTS.md or CLAUDE.md.',
+        `${CONFIG.checks} Commit on the current branch with a clear message.`,
         videoRule(card),
         'End with a short summary of what changed and what the chef should check.',
       ].join('\n');
     case 'review':
       return [
         'Stage: TESTING. You are the reviewer and tech writer, not the author of this change.',
-        `1. Review \`git diff ${baseBranch}...HEAD\` for bugs and AGENTS.md violations. Fix clear problems.`,
+        `1. Review \`git diff ${baseBranch}...HEAD\` for bugs and violations of the repo\'s AGENTS.md or CLAUDE.md. Fix clear problems.`,
         '2. Write the tests the change is missing (complex logic, server actions, bug fixes), following the repo\'s existing tests.',
-        '3. Run `npm run lint` and `npm run test`. Fix failures.',
-        `4. Write \`docs/changes/card-${card.idShort}.md\` (what changed, why, how to test it by hand) and update existing docs the change affects.`,
+        `3. ${CONFIG.checks}`,
+        CONFIG.shouldWriteChangeDocs
+          ? `4. Write \`docs/changes/card-${card.idShort}.md\` (what changed, why, how to test it by hand) and update existing docs the change affects.`
+          : '4. Update existing docs the change affects (no new change notes in the repo).',
         '5. Commit on the current branch.',
         `6. ${videoRule(card)}`,
         'End with a report: tests added, lint and test results, problems found and fixed, and what to check by hand. Finish the report with exactly these three parts, in this order:',
